@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-space text-text font-body;
+    overflow: hidden;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #55534e #07090d;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-panel/90 border border-white/10 rounded;
+  }
+
+  .panel {
+    @apply bg-panel/95;
+  }
+
+  .control-panel {
+    @apply bg-panel/90 border border-white/10 rounded;
+  }
+
+  .data-mono {
+    @apply font-mono text-sm tracking-tight;
+  }
+
+  .hud-label {
+    @apply font-mono text-xs uppercase tracking-widest text-text-muted;
+  }
+
+  .hud-value {
+    @apply font-display text-lg font-medium text-text;
+  }
+
+  .category-badge {
+    @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-mono uppercase tracking-wider;
+  }
+
+  .btn-primary {
+    @apply px-4 py-2 bg-bone/10 border border-bone/30 text-bone font-mono text-sm
+           hover:bg-bone/15 hover:border-bone/50 transition-colors duration-200
+           rounded flex items-center gap-2;
+  }
+
+  .btn-primary:disabled {
+    @apply opacity-50 cursor-not-allowed;
+  }
+
+  .investigation-panel {
+    @apply glass-panel p-6 max-h-[70vh] overflow-y-auto;
+  }
+
+  .source-citation {
+    @apply text-xs font-mono text-text-muted border-l-2 border-bone/30 pl-2 mt-1;
+  }
+}
+
+/* Custom scrollbar for panels */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #55534e;
+  border-radius: 2px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #85827a;
+}
+
+/* Loading shimmer */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg, transparent 25%, rgba(210,198,174,0.08) 50%, transparent 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
