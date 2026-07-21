@@ -7,7 +7,7 @@ const EARTH_RADIUS = 6371
 const ATMOSPHERE_RADIUS = EARTH_RADIUS * 1.03
 const STAR_RADIUS = 500000
 const MIN_ZOOM = 6600
-const MAX_ZOOM = 80000
+const MAX_ZOOM = 150000
 const CAMERA_START = 22000
 
 const CATEGORY_COLORS: Record<OrbitalObject['category'], THREE.Color> = {
@@ -18,13 +18,36 @@ const CATEGORY_COLORS: Record<OrbitalObject['category'], THREE.Color> = {
 }
 
 const CATEGORY_SIZES: Record<OrbitalObject['category'], number> = {
-  active_satellite: 7,
-  debris: 2,
+  active_satellite: 6,
+  debris: 3,
   rocket_body: 4,
-  asteroid: 8,
+  asteroid: 9,
 }
 
-// ─── Procedural Earth Texture — Pale Blue, Light Continents ───
+// ─── Custom Point Shader — Visible at All Distances ───
+const pointVertexShader = `
+  attribute float pointSize;
+  attribute vec3 pointColor;
+  varying vec3 vColor;
+  void main() {
+    vColor = pointColor;
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    gl_PointSize = pointSize * (300.0 / -mvPosition.z);
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`
+
+const pointFragmentShader = `
+  varying vec3 vColor;
+  void main() {
+    float dist = length(gl_PointCoord - vec2(0.5));
+    if (dist > 0.5) discard;
+    float alpha = 1.0 - smoothstep(0.3, 0.5, dist);
+    gl_FragColor = vec4(vColor, 1.0);
+  }
+`
+
+// ─── Procedural Earth Texture ───
 function createEarthTexture(): THREE.CanvasTexture {
   const size = 2048
   const canvas = document.createElement('canvas')
@@ -32,7 +55,6 @@ function createEarthTexture(): THREE.CanvasTexture {
   canvas.height = size / 2
   const ctx = canvas.getContext('2d')!
 
-  // Pale blue ocean — unified, no dark patches
   const oceanGrad = ctx.createLinearGradient(0, 0, 0, size / 2)
   oceanGrad.addColorStop(0, '#3a7ab8')
   oceanGrad.addColorStop(0.3, '#4a8ec8')
@@ -42,150 +64,29 @@ function createEarthTexture(): THREE.CanvasTexture {
   ctx.fillStyle = oceanGrad
   ctx.fillRect(0, 0, size, size / 2)
 
-  // Light green continents — pale, not dark
   ctx.fillStyle = '#7ab87a'
-
-  // North America — better shape
-  ctx.beginPath()
-  ctx.moveTo(0.16 * size, 0.20 * size / 2)
-  ctx.bezierCurveTo(0.22 * size, 0.14 * size / 2, 0.30 * size, 0.16 * size / 2, 0.34 * size, 0.22 * size / 2)
-  ctx.bezierCurveTo(0.36 * size, 0.28 * size / 2, 0.32 * size, 0.34 * size / 2, 0.26 * size, 0.36 * size / 2)
-  ctx.bezierCurveTo(0.20 * size, 0.34 * size / 2, 0.16 * size, 0.28 * size / 2, 0.16 * size, 0.20 * size / 2)
-  ctx.fill()
-
-  // South America
-  ctx.beginPath()
-  ctx.moveTo(0.28 * size, 0.38 * size / 2)
-  ctx.bezierCurveTo(0.34 * size, 0.36 * size / 2, 0.36 * size, 0.44 * size / 2, 0.34 * size, 0.56 * size / 2)
-  ctx.bezierCurveTo(0.32 * size, 0.64 * size / 2, 0.28 * size, 0.62 * size / 2, 0.26 * size, 0.54 * size / 2)
-  ctx.bezierCurveTo(0.24 * size, 0.46 * size / 2, 0.26 * size, 0.40 * size / 2, 0.28 * size, 0.38 * size / 2)
-  ctx.fill()
-
-  // Africa
-  ctx.beginPath()
-  ctx.moveTo(0.48 * size, 0.30 * size / 2)
-  ctx.bezierCurveTo(0.56 * size, 0.28 * size / 2, 0.60 * size, 0.36 * size / 2, 0.58 * size, 0.46 * size / 2)
-  ctx.bezierCurveTo(0.56 * size, 0.56 * size / 2, 0.52 * size, 0.58 * size / 2, 0.48 * size, 0.52 * size / 2)
-  ctx.bezierCurveTo(0.44 * size, 0.44 * size / 2, 0.44 * size, 0.36 * size / 2, 0.48 * size, 0.30 * size / 2)
-  ctx.fill()
-
-  // Europe
-  ctx.beginPath()
-  ctx.moveTo(0.48 * size, 0.20 * size / 2)
-  ctx.bezierCurveTo(0.54 * size, 0.18 * size / 2, 0.58 * size, 0.22 * size / 2, 0.58 * size, 0.28 * size / 2)
-  ctx.bezierCurveTo(0.56 * size, 0.32 * size / 2, 0.52 * size, 0.32 * size / 2, 0.48 * size, 0.28 * size / 2)
-  ctx.bezierCurveTo(0.46 * size, 0.24 * size / 2, 0.46 * size, 0.22 * size / 2, 0.48 * size, 0.20 * size / 2)
-  ctx.fill()
-
-  // Asia
-  ctx.beginPath()
-  ctx.moveTo(0.58 * size, 0.16 * size / 2)
-  ctx.bezierCurveTo(0.72 * size, 0.12 * size / 2, 0.82 * size, 0.18 * size / 2, 0.84 * size, 0.28 * size / 2)
-  ctx.bezierCurveTo(0.82 * size, 0.38 * size / 2, 0.74 * size, 0.40 * size / 2, 0.66 * size, 0.38 * size / 2)
-  ctx.bezierCurveTo(0.60 * size, 0.34 * size / 2, 0.58 * size, 0.26 * size / 2, 0.58 * size, 0.16 * size / 2)
-  ctx.fill()
-
-  // Australia
-  ctx.beginPath()
-  ctx.ellipse(0.80 * size, 0.58 * size / 2, 0.05 * size, 0.035 * size, 0.1, 0, Math.PI * 2)
-  ctx.fill()
-
-  // Indonesia / SE Asia islands
-  ctx.fillStyle = '#6aaa6a'
-  const islands = [
-    { x: 0.74, y: 0.42, w: 0.015, h: 0.01 },
-    { x: 0.76, y: 0.44, w: 0.012, h: 0.008 },
-    { x: 0.78, y: 0.40, w: 0.01, h: 0.006 },
-    { x: 0.72, y: 0.46, w: 0.008, h: 0.005 },
+  const continents = [
+    {x:0.16,y:0.20,w:0.18,h:0.16}, {x:0.28,y:0.38,w:0.08,h:0.24},
+    {x:0.48,y:0.30,w:0.12,h:0.22}, {x:0.48,y:0.20,w:0.10,h:0.08},
+    {x:0.58,y:0.16,w:0.26,h:0.22}, {x:0.80,y:0.58,w:0.10,h:0.07},
   ]
-  for (const isle of islands) {
+  for (const c of continents) {
     ctx.beginPath()
-    ctx.ellipse(isle.x * size, isle.y * size / 2, isle.w * size, isle.h * size, 0, 0, Math.PI * 2)
+    ctx.ellipse(c.x*size, c.y*size/2, c.w*size, c.h*size/2, 0, 0, Math.PI*2)
     ctx.fill()
   }
 
-  // Antarctica — white ice cap
   ctx.fillStyle = '#e8f0f8'
   ctx.beginPath()
-  ctx.ellipse(size / 2, size / 2 - size / 30, size / 2.3, size / 20, 0, 0, Math.PI * 2)
+  ctx.ellipse(size/2, size/2-size/30, size/2.3, size/20, 0, 0, Math.PI*2)
   ctx.fill()
-
-  // Greenland
-  ctx.beginPath()
-  ctx.ellipse(0.37 * size, 0.10 * size / 2, 0.025 * size, 0.04 * size, 0.2, 0, Math.PI * 2)
-  ctx.fill()
-
-  // Iceland
-  ctx.beginPath()
-  ctx.ellipse(0.44 * size, 0.14 * size / 2, 0.008 * size, 0.012 * size, 0.3, 0, Math.PI * 2)
-  ctx.fill()
-
-  // Lighter terrain variation on continents
-  ctx.fillStyle = '#8aca8a'
-  const terrainPatches = [
-    { x: 0.24, y: 0.26, w: 0.03, h: 0.02 },
-    { x: 0.52, y: 0.40, w: 0.04, h: 0.03 },
-    { x: 0.68, y: 0.24, w: 0.05, h: 0.03 },
-    { x: 0.32, y: 0.50, w: 0.02, h: 0.02 },
-  ]
-  for (const p of terrainPatches) {
-    ctx.beginPath()
-    ctx.ellipse(p.x * size, p.y * size / 2, p.w * size, p.h * size, 0, 0, Math.PI * 2)
-    ctx.fill()
-  }
-
-  // Desert / arid areas (tan)
-  ctx.fillStyle = '#c4b896'
-  const deserts = [
-    { x: 0.54, y: 0.36, w: 0.04, h: 0.02 },  // Sahara
-    { x: 0.70, y: 0.30, w: 0.06, h: 0.02 },  // Central Asia
-    { x: 0.24, y: 0.30, w: 0.03, h: 0.015 }, // US Southwest
-  ]
-  for (const d of deserts) {
-    ctx.beginPath()
-    ctx.ellipse(d.x * size, d.y * size / 2, d.w * size, d.h * size, 0, 0, Math.PI * 2)
-    ctx.fill()
-  }
-
-  // Subtle mountain ranges (brown-gray)
-  ctx.strokeStyle = '#9a8a7a'
-  ctx.lineWidth = 1.5
-  const ranges = [
-    { x1: 0.56, y1: 0.34, x2: 0.64, y2: 0.28 },  // Himalayas
-    { x1: 0.24, y1: 0.26, x2: 0.30, y2: 0.38 },  // Rockies
-    { x1: 0.30, y1: 0.42, x2: 0.34, y2: 0.56 },  // Andes
-  ]
-  for (const r of ranges) {
-    ctx.beginPath()
-    ctx.moveTo(r.x1 * size, r.y1 * size / 2)
-    ctx.lineTo(r.x2 * size, r.y2 * size / 2)
-    ctx.stroke()
-  }
-
-  // Arctic ice cap
-  ctx.fillStyle = '#f0f4f8'
-  ctx.beginPath()
-  ctx.ellipse(size / 2, size / 40, size / 3.5, size / 25, 0, 0, Math.PI * 2)
-  ctx.fill()
-
-  // Very subtle cloud streaks
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.08)'
-  for (let i = 0; i < 20; i++) {
-    const x = Math.random() * size
-    const y = Math.random() * size / 2
-    const w = 80 + Math.random() * 200
-    const h = 6 + Math.random() * 20
-    ctx.beginPath()
-    ctx.ellipse(x, y, w, h, Math.random() * Math.PI, 0, Math.PI * 2)
-    ctx.fill()
-  }
 
   const tex = new THREE.CanvasTexture(canvas)
   tex.colorSpace = THREE.SRGBColorSpace
   return tex
 }
 
-// ─── Atmosphere Shader — Subtle Blue Glow ───
+// ─── Atmosphere Shader ───
 const atmosphereVertexShader = `
   varying vec3 vNormal;
   varying vec3 vPosition;
@@ -204,14 +105,11 @@ const atmosphereFragmentShader = `
     vec3 viewDirection = normalize(-vPosition);
     float fresnel = 1.0 - abs(dot(viewDirection, vNormal));
     fresnel = pow(fresnel, 3.5);
-
     float sunDot = max(dot(vNormal, sunDirection), 0.0);
     float intensity = fresnel * (0.3 + sunDot * 0.2);
-
     vec3 atmosphereColor = vec3(0.3, 0.6, 0.95);
     vec3 twilightColor = vec3(0.4, 0.3, 0.6);
     vec3 color = mix(twilightColor, atmosphereColor, sunDot);
-
     gl_FragColor = vec4(color, intensity * 0.35);
   }
 `
@@ -223,43 +121,29 @@ function createStarfield() {
   const positions = new Float32Array(count * 3)
   const colors = new Float32Array(count * 3)
 
-  const colorPalette = [
-    new THREE.Color('#e8f4ff'),
-    new THREE.Color('#d4e8ff'),
-    new THREE.Color('#fff8e8'),
-    new THREE.Color('#ffe8c8'),
-    new THREE.Color('#ffd4a8'),
+  const palette = [
+    new THREE.Color('#e8f4ff'), new THREE.Color('#d4e8ff'),
+    new THREE.Color('#fff8e8'), new THREE.Color('#ffe8c8'),
   ]
 
   for (let i = 0; i < count; i++) {
     const theta = Math.random() * Math.PI * 2
     const phi = Math.acos(2 * Math.random() - 1)
     const r = STAR_RADIUS
-
-    positions[i * 3] = r * Math.sin(phi) * Math.cos(theta)
-    positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta)
-    positions[i * 3 + 2] = r * Math.cos(phi)
-
-    const color = colorPalette[Math.floor(Math.random() * colorPalette.length)]
-    colors[i * 3] = color.r
-    colors[i * 3 + 1] = color.g
-    colors[i * 3 + 2] = color.b
+    positions[i*3] = r * Math.sin(phi) * Math.cos(theta)
+    positions[i*3+1] = r * Math.sin(phi) * Math.sin(theta)
+    positions[i*3+2] = r * Math.cos(phi)
+    const c = palette[Math.floor(Math.random() * palette.length)]
+    colors[i*3] = c.r; colors[i*3+1] = c.g; colors[i*3+2] = c.b
   }
 
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
 
-  const material = new THREE.PointsMaterial({
-    size: 1.8,
-    vertexColors: true,
-    transparent: true,
-    opacity: 0.85,
-    sizeAttenuation: false,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-  })
-
-  return new THREE.Points(geometry, material)
+  return new THREE.Points(geometry, new THREE.PointsMaterial({
+    size: 1.8, vertexColors: true, transparent: false, opacity: 0.65,
+    sizeAttenuation: false, depthWrite: false,
+  }))
 }
 
 // ─── Trajectory Arc ───
@@ -271,26 +155,23 @@ function createTrajectory(object: OrbitalObject): THREE.BufferGeometry {
   const alt = Math.max(0, object.altitude_km)
   const radius = EARTH_RADIUS + alt
 
-  const phase = Math.asin(
-    Math.max(-1, Math.min(1, Math.sin(latRad) / Math.max(0.001, Math.abs(Math.sin(inclination)))))
-  )
+  const phase = Math.asin(Math.max(-1, Math.min(1,
+    Math.sin(latRad) / Math.max(0.001, Math.abs(Math.sin(inclination))))))
 
   for (let i = 0; i <= 180; i++) {
     const angle = (i / 180) * Math.PI * 2
     const orbitLat = Math.asin(Math.sin(inclination) * Math.sin(angle + phase))
     const orbitLon = lonRad + angle
-
     const r = radius
-    const x = r * Math.cos(orbitLat) * Math.cos(orbitLon)
-    const y = r * Math.sin(orbitLat)
-    const z = r * Math.cos(orbitLat) * Math.sin(orbitLon)
-    points.push(new THREE.Vector3(x, y, z))
+    points.push(new THREE.Vector3(
+      r * Math.cos(orbitLat) * Math.cos(orbitLon),
+      r * Math.sin(orbitLat),
+      r * Math.cos(orbitLat) * Math.sin(orbitLon)
+    ))
   }
-
   return new THREE.BufferGeometry().setFromPoints(points)
 }
 
-// ─── Main Scene Component ───
 export function Scene() {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -304,6 +185,7 @@ export function Scene() {
   const selectionGroupRef = useRef<THREE.Group | null>(null)
   const raycasterRef = useRef<THREE.Raycaster | null>(null)
   const mouseRef = useRef<THREE.Vector2>(new THREE.Vector2())
+  const sunDirectionRef = useRef<THREE.Vector3>(new THREE.Vector3(0.8, 0.3, 0.5).normalize())
 
   const objects = usePlanetesStore(state => state.objects)
   const activeFilters = usePlanetesStore(state => state.activeFilters)
@@ -312,7 +194,6 @@ export function Scene() {
 
   useEffect(() => {
     if (!containerRef.current) return
-
     const container = containerRef.current
     const width = container.clientWidth
     const height = container.clientHeight
@@ -334,7 +215,6 @@ export function Scene() {
     container.appendChild(renderer.domElement)
     rendererRef.current = renderer
 
-    // ─── FIX: No polar angle limits — free 360° rotation ───
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
     controls.dampingFactor = 0.05
@@ -349,7 +229,6 @@ export function Scene() {
     controls.maxPolarAngle = Math.PI
     controlsRef.current = controls
 
-    // Lighting — balanced for pale Earth
     const ambientLight = new THREE.AmbientLight('#c8d8e8', 0.5)
     scene.add(ambientLight)
 
@@ -361,15 +240,12 @@ export function Scene() {
     fillLight.position.set(-30000, 10000, -20000)
     scene.add(fillLight)
 
-    // ─── Earth Group — Unified Pale Blue Ball ───
     const earthGroup = new THREE.Group()
     scene.add(earthGroup)
     earthGroupRef.current = earthGroup
 
     const earthGeometry = new THREE.SphereGeometry(EARTH_RADIUS, 128, 128)
-
-    // Single unified texture — pale blue, light green
-    const earthTexture = new THREE.TextureLoader().load('/earth.jpg')
+    const earthTexture = new THREE.TextureLoader().load("/earth.jpg")
     const earthMaterial = new THREE.MeshPhongMaterial({
       map: earthTexture,
       shininess: 30,
@@ -378,15 +254,14 @@ export function Scene() {
     const earth = new THREE.Mesh(earthGeometry, earthMaterial)
     earthGroup.add(earth)
 
-    // Subtle atmosphere glow
     const atmosphereGeometry = new THREE.SphereGeometry(ATMOSPHERE_RADIUS, 64, 64)
     const atmosphereMaterial = new THREE.ShaderMaterial({
       vertexShader: atmosphereVertexShader,
       fragmentShader: atmosphereFragmentShader,
       uniforms: {
-        sunDirection: { value: new THREE.Vector3(0.8, 0.3, 0.5).normalize() },
+        sunDirection: { value: sunDirectionRef.current.clone() },
       },
-      transparent: true,
+      transparent: false,
       side: THREE.BackSide,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
@@ -394,34 +269,28 @@ export function Scene() {
     const atmosphere = new THREE.Mesh(atmosphereGeometry, atmosphereMaterial)
     earthGroup.add(atmosphere)
 
-    // ─── Stars ───
     const stars = createStarfield()
     scene.add(stars)
     starsRef.current = stars
 
-    // ─── Orbital Objects Group ───
     const orbitalGroup = new THREE.Group()
     scene.add(orbitalGroup)
     orbitalGroupRef.current = orbitalGroup
 
-    // ─── Selection Group ───
     const selectionGroup = new THREE.Group()
     scene.add(selectionGroup)
     selectionGroupRef.current = selectionGroup
 
     raycasterRef.current = new THREE.Raycaster()
 
-    // Animation loop
     const animate = () => {
       rafRef.current = requestAnimationFrame(animate)
 
-      // Parallax stars
       if (starsRef.current && cameraRef.current) {
         starsRef.current.rotation.y = cameraRef.current.rotation.y * 0.1
         starsRef.current.rotation.x = cameraRef.current.rotation.x * 0.05
       }
 
-      // Slow Earth rotation
       if (earthGroupRef.current) {
         earthGroupRef.current.rotation.y += 0.0001
       }
@@ -431,7 +300,6 @@ export function Scene() {
     }
     animate()
 
-    // Resize
     const handleResize = () => {
       const w = container.clientWidth
       const h = container.clientHeight
@@ -441,7 +309,7 @@ export function Scene() {
     }
     window.addEventListener('resize', handleResize)
 
-    // Click handler
+    // ─── CLICK HANDLER — Uses invisible hit spheres, not tiny points ───
     const handleClick = (event: MouseEvent) => {
       const rect = renderer.domElement.getBoundingClientRect()
       mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
@@ -453,30 +321,14 @@ export function Scene() {
       if (!raycaster || !camera || !orbitalGroup) return
 
       raycaster.setFromCamera(mouseRef.current, camera)
-      const intersects = raycaster.intersectObjects(orbitalGroup.children, true)
+      // Intersect against hit spheres (children of orbitalGroup)
+      const hitSpheres = orbitalGroup.children.filter(c => c.userData.isHitSphere)
+      const intersects = raycaster.intersectObjects(hitSpheres, false)
 
       if (intersects.length > 0) {
-        const userData = intersects[0].object.userData
-        if (userData?.objects && userData.objects.length > 0) {
-          const hitPoint = intersects[0].point
-          let closest = userData.objects[0]
-          let closestDist = Infinity
-          for (const obj of userData.objects) {
-            const r = EARTH_RADIUS + Math.max(0, obj.altitude_km)
-            const lat = THREE.MathUtils.degToRad(obj.latitude)
-            const lon = THREE.MathUtils.degToRad(obj.longitude)
-            const pos = new THREE.Vector3(
-              r * Math.cos(lat) * Math.cos(lon),
-              r * Math.sin(lat),
-              r * Math.cos(lat) * Math.sin(lon)
-            )
-            const dist = pos.distanceToSquared(hitPoint)
-            if (dist < closestDist) {
-              closestDist = dist
-              closest = obj
-            }
-          }
-          selectObject(closest)
+        const hitObject = intersects[0].object.userData.orbitalObject
+        if (hitObject) {
+          selectObject(hitObject)
         }
       } else {
         selectObject(null)
@@ -494,14 +346,23 @@ export function Scene() {
     }
   }, [selectObject])
 
-  // ─── Update Orbital Objects ───
+  // ─── Update Orbital Objects — Custom Shader + Hit Spheres ───
   useEffect(() => {
     const group = orbitalGroupRef.current
     if (!group) return
 
+    // Clear existing
     while (group.children.length > 0) {
       const child = group.children[0]
       if (child instanceof THREE.Points) {
+        child.geometry.dispose()
+        if (Array.isArray(child.material)) {
+          child.material.forEach(m => m.dispose())
+        } else {
+          child.material.dispose()
+        }
+      }
+      if (child instanceof THREE.Mesh) {
         child.geometry.dispose()
         if (Array.isArray(child.material)) {
           child.material.forEach(m => m.dispose())
@@ -528,11 +389,14 @@ export function Scene() {
     for (const [category, items] of Object.entries(byCategory)) {
       if (items.length === 0) continue
 
+      // ─── Custom Shader Points ───
       const geometry = new THREE.BufferGeometry()
       const positions = new Float32Array(items.length * 3)
       const colors = new Float32Array(items.length * 3)
+      const sizes = new Float32Array(items.length)
 
       const catColor = CATEGORY_COLORS[category as OrbitalObject['category']]
+      const catSize = CATEGORY_SIZES[category as OrbitalObject['category']]
 
       for (let i = 0; i < items.length; i++) {
         const obj = items[i]
@@ -547,25 +411,53 @@ export function Scene() {
         colors[i * 3] = catColor.r
         colors[i * 3 + 1] = catColor.g
         colors[i * 3 + 2] = catColor.b
+
+        sizes[i] = catSize
       }
 
       geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-      geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+      geometry.setAttribute('pointColor', new THREE.BufferAttribute(colors, 3))
+      geometry.setAttribute('pointSize', new THREE.BufferAttribute(sizes, 1))
 
-      const material = new THREE.PointsMaterial({
-        size: CATEGORY_SIZES[category as OrbitalObject['category']],
-        vertexColors: true,
-        transparent: true,
-        opacity: 0.9,
-        sizeAttenuation: true,
-        blending: THREE.AdditiveBlending,
+      const material = new THREE.ShaderMaterial({
+        vertexShader: pointVertexShader,
+        fragmentShader: pointFragmentShader,
+        transparent: false,
         depthWrite: false,
+        blending: THREE.AdditiveBlending,
       })
 
       const points = new THREE.Points(geometry, material)
-      points.userData = { category, objects: items }
       points.visible = activeFilters.has(category)
       group.add(points)
+
+      // ─── Invisible Hit Spheres for Clicking ───
+      const hitGeometry = new THREE.SphereGeometry(80, 8, 8)
+      const hitMaterial = new THREE.MeshBasicMaterial({ color: catColor,
+        visible: true,
+        transparent: false,
+        opacity: 1.0,
+      })
+
+      for (let i = 0; i < items.length; i++) {
+        const obj = items[i]
+        const r = EARTH_RADIUS + Math.max(0, obj.altitude_km)
+        const lat = THREE.MathUtils.degToRad(obj.latitude)
+        const lon = THREE.MathUtils.degToRad(obj.longitude)
+
+        const hitSphere = new THREE.Mesh(hitGeometry, hitMaterial)
+        hitSphere.position.set(
+          r * Math.cos(lat) * Math.cos(lon),
+          r * Math.sin(lat),
+          r * Math.cos(lat) * Math.sin(lon)
+        )
+        hitSphere.userData = {
+          isHitSphere: true,
+          orbitalObject: obj,
+        }
+        hitSphere.visible = activeFilters.has(category)
+        group.add(hitSphere)
+      }
     }
   }, [objects])
 
@@ -575,9 +467,12 @@ export function Scene() {
     if (!group) return
 
     for (const child of group.children) {
-      if (child instanceof THREE.Points) {
-        const cat = child.userData.category as OrbitalObject['category']
+      const cat = child.userData.category
+      if (cat) {
         child.visible = activeFilters.has(cat)
+      }
+      if (child.userData.isHitSphere) {
+        child.visible = activeFilters.has(child.userData.orbitalObject?.category)
       }
     }
   }, [activeFilters])
@@ -611,11 +506,10 @@ export function Scene() {
       r * Math.cos(lat) * Math.sin(lon)
     )
 
-    // Highlight ring
     const ringGeometry = new THREE.RingGeometry(12, 18, 32)
     const ringMaterial = new THREE.MeshBasicMaterial({
-      color: '#d2c6ae',
-      transparent: true,
+      color: '#60a5fa',
+      transparent: false,
       opacity: 0.8,
       side: THREE.DoubleSide,
     })
@@ -624,15 +518,13 @@ export function Scene() {
     ring.lookAt(0, 0, 0)
     group.add(ring)
 
-    // Trajectory
     const trajGeometry = createTrajectory(selectedObject)
     const trajMaterial = new THREE.LineBasicMaterial({
-      color: '#4c93c3',
-      transparent: true,
-      opacity: 0.5,
+      color: '#60a5fa',
+      transparent: false,
+      opacity: 1.0,
     })
-    const trajectory = new THREE.Line(trajGeometry, trajMaterial)
-    group.add(trajectory)
+    group.add(new THREE.Line(trajGeometry, trajMaterial))
   }, [selectedObject])
 
   return (
