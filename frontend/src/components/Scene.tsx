@@ -11,10 +11,10 @@ const MAX_ZOOM = 80000
 const CAMERA_START = 22000
 
 const CATEGORY_COLORS: Record<OrbitalObject['category'], THREE.Color> = {
-  active_satellite: new THREE.Color('#00f0ff'),
-  debris: new THREE.Color('#ff4444'),
+  active_satellite: new THREE.Color('#4ade80'),
+  debris: new THREE.Color('#f87171'),
   rocket_body: new THREE.Color('#ffaa00'),
-  asteroid: new THREE.Color('#ffffff'),
+  asteroid: new THREE.Color('#f59e0b'),
 }
 
 const CATEGORY_SIZES: Record<OrbitalObject['category'], number> = {
