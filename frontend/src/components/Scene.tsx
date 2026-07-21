@@ -1,83 +1,310 @@
-import { useEffect, useRef, useState } from 'react'
-import {
-  ArcGisMapServerImageryProvider,
-  BlendOption,
-  Cartesian2,
-  Cartesian3,
-  Color,
-  Credit,
-  createWorldImageryAsync,
-  EllipsoidTerrainProvider,
-  ImageryLayer,
-  Ion,
-  IonWorldImageryStyle,
-  Math as CesiumMath,
-  NearFarScalar,
-  PointPrimitive,
-  PointPrimitiveCollection,
-  PolylineCollection,
-  ScreenSpaceEventHandler,
-  ScreenSpaceEventType,
-  UrlTemplateImageryProvider,
-  Viewer,
-} from 'cesium'
-import 'cesium/Build/Cesium/Widgets/widgets.css'
+import { useEffect, useRef } from 'react'
+import * as THREE from 'three'
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { type OrbitalObject, usePlanetesStore } from '../store'
 
-const CATEGORY_COLORS: Record<OrbitalObject['category'], Color> = {
-  active_satellite: Color.fromCssColorString('#a39f96'),
-  debris: Color.fromCssColorString('#6f2922'),
-  rocket_body: Color.fromCssColorString('#77685b'),
-  asteroid: Color.fromCssColorString('#b8b0a1'),
+const EARTH_RADIUS = 6371
+const ATMOSPHERE_RADIUS = EARTH_RADIUS * 1.03
+const STAR_RADIUS = 500000
+const MIN_ZOOM = 6600
+const MAX_ZOOM = 80000
+const CAMERA_START = 22000
+
+const CATEGORY_COLORS: Record<OrbitalObject['category'], THREE.Color> = {
+  active_satellite: new THREE.Color('#00f0ff'),
+  debris: new THREE.Color('#ff4444'),
+  rocket_body: new THREE.Color('#ffaa00'),
+  asteroid: new THREE.Color('#ffffff'),
 }
 
 const CATEGORY_SIZES: Record<OrbitalObject['category'], number> = {
   active_satellite: 4,
   debris: 3,
   rocket_body: 4,
-  asteroid: 5,
+  asteroid: 6,
 }
 
-type CategoryCollections = Record<OrbitalObject['category'], PointPrimitiveCollection>
-type PointIndex = Map<string, { category: OrbitalObject['category']; point: PointPrimitive }>
+// ─── Procedural Earth Texture — Pale Blue, Light Continents ───
+function createEarthTexture(): THREE.CanvasTexture {
+  const size = 2048
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size / 2
+  const ctx = canvas.getContext('2d')!
 
-function isOrbitalObject(value: unknown): value is OrbitalObject {
-  if (!value || typeof value !== 'object') return false
-  return typeof (value as OrbitalObject).norad_id === 'string'
-}
+  // Pale blue ocean — unified, no dark patches
+  const oceanGrad = ctx.createLinearGradient(0, 0, 0, size / 2)
+  oceanGrad.addColorStop(0, '#3a7ab8')
+  oceanGrad.addColorStop(0.3, '#4a8ec8')
+  oceanGrad.addColorStop(0.5, '#5a9ed8')
+  oceanGrad.addColorStop(0.7, '#4a8ec8')
+  oceanGrad.addColorStop(1, '#3a7ab8')
+  ctx.fillStyle = oceanGrad
+  ctx.fillRect(0, 0, size, size / 2)
 
-function createTrajectory(object: OrbitalObject) {
-  const positions: Cartesian3[] = []
-  const inclination = CesiumMath.toRadians(object.inclination_deg)
-  const latitude = CesiumMath.toRadians(object.latitude)
-  const phase = Math.asin(
-    Math.max(-1, Math.min(1, Math.sin(latitude) / Math.max(0.001, Math.abs(Math.sin(inclination))))),
-  )
+  // Light green continents — pale, not dark
+  ctx.fillStyle = '#7ab87a'
 
-  for (let index = 0; index <= 180; index++) {
-    const angle = (index / 180) * Math.PI * 2
-    const orbitLatitude = Math.asin(Math.sin(inclination) * Math.sin(angle + phase))
-    const orbitLongitude = object.longitude + CesiumMath.toDegrees(angle)
-    positions.push(
-      Cartesian3.fromDegrees(
-        orbitLongitude,
-        CesiumMath.toDegrees(orbitLatitude),
-        object.altitude_km * 1000,
-      ),
-    )
+  // North America — better shape
+  ctx.beginPath()
+  ctx.moveTo(0.16 * size, 0.20 * size / 2)
+  ctx.bezierCurveTo(0.22 * size, 0.14 * size / 2, 0.30 * size, 0.16 * size / 2, 0.34 * size, 0.22 * size / 2)
+  ctx.bezierCurveTo(0.36 * size, 0.28 * size / 2, 0.32 * size, 0.34 * size / 2, 0.26 * size, 0.36 * size / 2)
+  ctx.bezierCurveTo(0.20 * size, 0.34 * size / 2, 0.16 * size, 0.28 * size / 2, 0.16 * size, 0.20 * size / 2)
+  ctx.fill()
+
+  // South America
+  ctx.beginPath()
+  ctx.moveTo(0.28 * size, 0.38 * size / 2)
+  ctx.bezierCurveTo(0.34 * size, 0.36 * size / 2, 0.36 * size, 0.44 * size / 2, 0.34 * size, 0.56 * size / 2)
+  ctx.bezierCurveTo(0.32 * size, 0.64 * size / 2, 0.28 * size, 0.62 * size / 2, 0.26 * size, 0.54 * size / 2)
+  ctx.bezierCurveTo(0.24 * size, 0.46 * size / 2, 0.26 * size, 0.40 * size / 2, 0.28 * size, 0.38 * size / 2)
+  ctx.fill()
+
+  // Africa
+  ctx.beginPath()
+  ctx.moveTo(0.48 * size, 0.30 * size / 2)
+  ctx.bezierCurveTo(0.56 * size, 0.28 * size / 2, 0.60 * size, 0.36 * size / 2, 0.58 * size, 0.46 * size / 2)
+  ctx.bezierCurveTo(0.56 * size, 0.56 * size / 2, 0.52 * size, 0.58 * size / 2, 0.48 * size, 0.52 * size / 2)
+  ctx.bezierCurveTo(0.44 * size, 0.44 * size / 2, 0.44 * size, 0.36 * size / 2, 0.48 * size, 0.30 * size / 2)
+  ctx.fill()
+
+  // Europe
+  ctx.beginPath()
+  ctx.moveTo(0.48 * size, 0.20 * size / 2)
+  ctx.bezierCurveTo(0.54 * size, 0.18 * size / 2, 0.58 * size, 0.22 * size / 2, 0.58 * size, 0.28 * size / 2)
+  ctx.bezierCurveTo(0.56 * size, 0.32 * size / 2, 0.52 * size, 0.32 * size / 2, 0.48 * size, 0.28 * size / 2)
+  ctx.bezierCurveTo(0.46 * size, 0.24 * size / 2, 0.46 * size, 0.22 * size / 2, 0.48 * size, 0.20 * size / 2)
+  ctx.fill()
+
+  // Asia
+  ctx.beginPath()
+  ctx.moveTo(0.58 * size, 0.16 * size / 2)
+  ctx.bezierCurveTo(0.72 * size, 0.12 * size / 2, 0.82 * size, 0.18 * size / 2, 0.84 * size, 0.28 * size / 2)
+  ctx.bezierCurveTo(0.82 * size, 0.38 * size / 2, 0.74 * size, 0.40 * size / 2, 0.66 * size, 0.38 * size / 2)
+  ctx.bezierCurveTo(0.60 * size, 0.34 * size / 2, 0.58 * size, 0.26 * size / 2, 0.58 * size, 0.16 * size / 2)
+  ctx.fill()
+
+  // Australia
+  ctx.beginPath()
+  ctx.ellipse(0.80 * size, 0.58 * size / 2, 0.05 * size, 0.035 * size, 0.1, 0, Math.PI * 2)
+  ctx.fill()
+
+  // Indonesia / SE Asia islands
+  ctx.fillStyle = '#6aaa6a'
+  const islands = [
+    { x: 0.74, y: 0.42, w: 0.015, h: 0.01 },
+    { x: 0.76, y: 0.44, w: 0.012, h: 0.008 },
+    { x: 0.78, y: 0.40, w: 0.01, h: 0.006 },
+    { x: 0.72, y: 0.46, w: 0.008, h: 0.005 },
+  ]
+  for (const isle of islands) {
+    ctx.beginPath()
+    ctx.ellipse(isle.x * size, isle.y * size / 2, isle.w * size, isle.h * size, 0, 0, Math.PI * 2)
+    ctx.fill()
   }
 
-  return positions
+  // Antarctica — white ice cap
+  ctx.fillStyle = '#e8f0f8'
+  ctx.beginPath()
+  ctx.ellipse(size / 2, size / 2 - size / 30, size / 2.3, size / 20, 0, 0, Math.PI * 2)
+  ctx.fill()
+
+  // Greenland
+  ctx.beginPath()
+  ctx.ellipse(0.37 * size, 0.10 * size / 2, 0.025 * size, 0.04 * size, 0.2, 0, Math.PI * 2)
+  ctx.fill()
+
+  // Iceland
+  ctx.beginPath()
+  ctx.ellipse(0.44 * size, 0.14 * size / 2, 0.008 * size, 0.012 * size, 0.3, 0, Math.PI * 2)
+  ctx.fill()
+
+  // Lighter terrain variation on continents
+  ctx.fillStyle = '#8aca8a'
+  const terrainPatches = [
+    { x: 0.24, y: 0.26, w: 0.03, h: 0.02 },
+    { x: 0.52, y: 0.40, w: 0.04, h: 0.03 },
+    { x: 0.68, y: 0.24, w: 0.05, h: 0.03 },
+    { x: 0.32, y: 0.50, w: 0.02, h: 0.02 },
+  ]
+  for (const p of terrainPatches) {
+    ctx.beginPath()
+    ctx.ellipse(p.x * size, p.y * size / 2, p.w * size, p.h * size, 0, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  // Desert / arid areas (tan)
+  ctx.fillStyle = '#c4b896'
+  const deserts = [
+    { x: 0.54, y: 0.36, w: 0.04, h: 0.02 },  // Sahara
+    { x: 0.70, y: 0.30, w: 0.06, h: 0.02 },  // Central Asia
+    { x: 0.24, y: 0.30, w: 0.03, h: 0.015 }, // US Southwest
+  ]
+  for (const d of deserts) {
+    ctx.beginPath()
+    ctx.ellipse(d.x * size, d.y * size / 2, d.w * size, d.h * size, 0, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  // Subtle mountain ranges (brown-gray)
+  ctx.strokeStyle = '#9a8a7a'
+  ctx.lineWidth = 1.5
+  const ranges = [
+    { x1: 0.56, y1: 0.34, x2: 0.64, y2: 0.28 },  // Himalayas
+    { x1: 0.24, y1: 0.26, x2: 0.30, y2: 0.38 },  // Rockies
+    { x1: 0.30, y1: 0.42, x2: 0.34, y2: 0.56 },  // Andes
+  ]
+  for (const r of ranges) {
+    ctx.beginPath()
+    ctx.moveTo(r.x1 * size, r.y1 * size / 2)
+    ctx.lineTo(r.x2 * size, r.y2 * size / 2)
+    ctx.stroke()
+  }
+
+  // Arctic ice cap
+  ctx.fillStyle = '#f0f4f8'
+  ctx.beginPath()
+  ctx.ellipse(size / 2, size / 40, size / 3.5, size / 25, 0, 0, Math.PI * 2)
+  ctx.fill()
+
+  // Very subtle cloud streaks
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.08)'
+  for (let i = 0; i < 20; i++) {
+    const x = Math.random() * size
+    const y = Math.random() * size / 2
+    const w = 80 + Math.random() * 200
+    const h = 6 + Math.random() * 20
+    ctx.beginPath()
+    ctx.ellipse(x, y, w, h, Math.random() * Math.PI, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
 }
 
+// ─── Atmosphere Shader — Subtle Blue Glow ───
+const atmosphereVertexShader = `
+  varying vec3 vNormal;
+  varying vec3 vPosition;
+  void main() {
+    vNormal = normalize(normalMatrix * normal);
+    vPosition = (modelViewMatrix * vec4(position, 1.0)).xyz;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`
+
+const atmosphereFragmentShader = `
+  varying vec3 vNormal;
+  varying vec3 vPosition;
+  uniform vec3 sunDirection;
+  void main() {
+    vec3 viewDirection = normalize(-vPosition);
+    float fresnel = 1.0 - abs(dot(viewDirection, vNormal));
+    fresnel = pow(fresnel, 3.5);
+
+    float sunDot = max(dot(vNormal, sunDirection), 0.0);
+    float intensity = fresnel * (0.3 + sunDot * 0.2);
+
+    vec3 atmosphereColor = vec3(0.3, 0.6, 0.95);
+    vec3 twilightColor = vec3(0.4, 0.3, 0.6);
+    vec3 color = mix(twilightColor, atmosphereColor, sunDot);
+
+    gl_FragColor = vec4(color, intensity * 0.35);
+  }
+`
+
+// ─── Starfield ───
+function createStarfield() {
+  const count = 12000
+  const geometry = new THREE.BufferGeometry()
+  const positions = new Float32Array(count * 3)
+  const colors = new Float32Array(count * 3)
+
+  const colorPalette = [
+    new THREE.Color('#e8f4ff'),
+    new THREE.Color('#d4e8ff'),
+    new THREE.Color('#fff8e8'),
+    new THREE.Color('#ffe8c8'),
+    new THREE.Color('#ffd4a8'),
+  ]
+
+  for (let i = 0; i < count; i++) {
+    const theta = Math.random() * Math.PI * 2
+    const phi = Math.acos(2 * Math.random() - 1)
+    const r = STAR_RADIUS
+
+    positions[i * 3] = r * Math.sin(phi) * Math.cos(theta)
+    positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta)
+    positions[i * 3 + 2] = r * Math.cos(phi)
+
+    const color = colorPalette[Math.floor(Math.random() * colorPalette.length)]
+    colors[i * 3] = color.r
+    colors[i * 3 + 1] = color.g
+    colors[i * 3 + 2] = color.b
+  }
+
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+
+  const material = new THREE.PointsMaterial({
+    size: 1.2,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.85,
+    sizeAttenuation: false,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  })
+
+  return new THREE.Points(geometry, material)
+}
+
+// ─── Trajectory Arc ───
+function createTrajectory(object: OrbitalObject): THREE.BufferGeometry {
+  const points: THREE.Vector3[] = []
+  const inclination = THREE.MathUtils.degToRad(object.inclination_deg)
+  const latRad = THREE.MathUtils.degToRad(object.latitude)
+  const lonRad = THREE.MathUtils.degToRad(object.longitude)
+  const alt = Math.max(0, object.altitude_km)
+  const radius = EARTH_RADIUS + alt
+
+  const phase = Math.asin(
+    Math.max(-1, Math.min(1, Math.sin(latRad) / Math.max(0.001, Math.abs(Math.sin(inclination)))))
+  )
+
+  for (let i = 0; i <= 180; i++) {
+    const angle = (i / 180) * Math.PI * 2
+    const orbitLat = Math.asin(Math.sin(inclination) * Math.sin(angle + phase))
+    const orbitLon = lonRad + angle
+
+    const r = radius
+    const x = r * Math.cos(orbitLat) * Math.cos(orbitLon)
+    const y = r * Math.sin(orbitLat)
+    const z = r * Math.cos(orbitLat) * Math.sin(orbitLon)
+    points.push(new THREE.Vector3(x, y, z))
+  }
+
+  return new THREE.BufferGeometry().setFromPoints(points)
+}
+
+// ─── Main Scene Component ───
 export function Scene() {
   const containerRef = useRef<HTMLDivElement>(null)
-  const viewerRef = useRef<Viewer | null>(null)
-  const collectionsRef = useRef<CategoryCollections | null>(null)
-  const pointsRef = useRef<PointIndex>(new Map())
-  const selectionRef = useRef<PointPrimitiveCollection | null>(null)
-  const trajectoryRef = useRef<PolylineCollection | null>(null)
-  const [imageryNotice, setImageryNotice] = useState<string | null>(null)
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
+  const sceneRef = useRef<THREE.Scene | null>(null)
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
+  const controlsRef = useRef<OrbitControls | null>(null)
+  const rafRef = useRef<number>(0)
+  const earthGroupRef = useRef<THREE.Group | null>(null)
+  const starsRef = useRef<THREE.Points | null>(null)
+  const orbitalGroupRef = useRef<THREE.Group | null>(null)
+  const selectionGroupRef = useRef<THREE.Group | null>(null)
+  const raycasterRef = useRef<THREE.Raycaster | null>(null)
+  const mouseRef = useRef<THREE.Vector2>(new THREE.Vector2())
+
   const objects = usePlanetesStore(state => state.objects)
   const activeFilters = usePlanetesStore(state => state.activeFilters)
   const selectedObject = usePlanetesStore(state => state.selectedObject)
@@ -86,325 +313,329 @@ export function Scene() {
   useEffect(() => {
     if (!containerRef.current) return
 
-    const token = import.meta.env.VITE_CESIUM_ION_TOKEN?.trim()
-    if (token) Ion.defaultAccessToken = token
+    const container = containerRef.current
+    const width = container.clientWidth
+    const height = container.clientHeight
 
-    const viewer = new Viewer(containerRef.current, {
-      animation: false,
-      baseLayer: false,
-      baseLayerPicker: false,
-      fullscreenButton: false,
-      geocoder: false,
-      homeButton: false,
-      infoBox: false,
-      navigationHelpButton: false,
-      sceneModePicker: false,
-      selectionIndicator: false,
-      scene3DOnly: true,
-      skyBox: false,
-      timeline: false,
-      terrainProvider: new EllipsoidTerrainProvider(),
-      shouldAnimate: false,
-      requestRenderMode: true,
-      maximumRenderTimeChange: 60,
-      orderIndependentTranslucency: false,
-      msaaSamples: 2,
-      useBrowserRecommendedResolution: true,
-      contextOptions: {
-        webgl: {
-          alpha: true,
-          antialias: true,
-        },
-      },
+    const scene = new THREE.Scene()
+    scene.background = new THREE.Color('#02040a')
+    sceneRef.current = scene
+
+    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, STAR_RADIUS * 2)
+    camera.position.set(0, 0, CAMERA_START)
+    cameraRef.current = camera
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
+    renderer.setSize(width, height)
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    renderer.setClearColor('#02040a', 1)
+    renderer.toneMapping = THREE.ACESFilmicToneMapping
+    renderer.toneMappingExposure = 1.0
+    container.appendChild(renderer.domElement)
+    rendererRef.current = renderer
+
+    // ─── FIX: No polar angle limits — free 360° rotation ───
+    const controls = new OrbitControls(camera, renderer.domElement)
+    controls.enableDamping = true
+    controls.dampingFactor = 0.05
+    controls.minDistance = MIN_ZOOM
+    controls.maxDistance = MAX_ZOOM
+    controls.enablePan = false
+    controls.rotateSpeed = 0.6
+    controls.zoomSpeed = 0.8
+    controls.autoRotate = true
+    controls.autoRotateSpeed = 0.15
+    controls.minPolarAngle = 0
+    controls.maxPolarAngle = Math.PI
+    controlsRef.current = controls
+
+    // Lighting — balanced for pale Earth
+    const ambientLight = new THREE.AmbientLight('#c8d8e8', 0.5)
+    scene.add(ambientLight)
+
+    const sunLight = new THREE.DirectionalLight('#fff8e8', 1.8)
+    sunLight.position.set(50000, 20000, 30000)
+    scene.add(sunLight)
+
+    const fillLight = new THREE.DirectionalLight('#a8c8e8', 0.4)
+    fillLight.position.set(-30000, 10000, -20000)
+    scene.add(fillLight)
+
+    // ─── Earth Group — Unified Pale Blue Ball ───
+    const earthGroup = new THREE.Group()
+    scene.add(earthGroup)
+    earthGroupRef.current = earthGroup
+
+    const earthGeometry = new THREE.SphereGeometry(EARTH_RADIUS, 128, 128)
+
+    // Single unified texture — pale blue, light green
+    const earthTexture = new THREE.TextureLoader().load('/earth.jpg')
+    const earthMaterial = new THREE.MeshPhongMaterial({
+      map: earthTexture,
+      shininess: 30,
+      specular: new THREE.Color('#3a7aaa'),
     })
-    viewerRef.current = viewer
+    const earth = new THREE.Mesh(earthGeometry, earthMaterial)
+    earthGroup.add(earth)
 
-    viewer.scene.globe.maximumScreenSpaceError = 1.5
-    viewer.scene.globe.tileCacheSize = 220
-    viewer.scene.globe.preloadSiblings = false
-    viewer.scene.globe.showGroundAtmosphere = true
-    viewer.scene.globe.enableLighting = true
-    viewer.scene.globe.dynamicAtmosphereLighting = true
-    viewer.scene.globe.dynamicAtmosphereLightingFromSun = true
-    viewer.scene.globe.lightingFadeOutDistance = 6_500_000
-    viewer.scene.globe.lightingFadeInDistance = 18_000_000
-    viewer.scene.globe.nightFadeOutDistance = 4_000_000
-    viewer.scene.globe.nightFadeInDistance = 14_000_000
-    viewer.scene.globe.baseColor = Color.fromCssColorString('#07111b')
-    viewer.scene.postProcessStages.fxaa.enabled = true
-    viewer.scene.highDynamicRange = false
-    viewer.scene.backgroundColor = Color.TRANSPARENT
-    viewer.resolutionScale = Math.min(window.devicePixelRatio || 1, 1.5)
-
-    const controls = viewer.scene.screenSpaceCameraController
-    controls.enableRotate = true
-    controls.enableZoom = true
-    controls.enableTilt = true
-    controls.enableLook = true
-    controls.enableCollisionDetection = true
-    controls.inertiaSpin = 0.94
-    controls.inertiaZoom = 0.8
-    controls.zoomFactor = 3.2
-    controls.maximumMovementRatio = 0.3
-    controls.minimumZoomDistance = 100_000
-    controls.maximumZoomDistance = 70_000_000
-
-    viewer.camera.setView({
-      destination: Cartesian3.fromDegrees(12, 24, 22_000_000),
-      orientation: {
-        heading: 0,
-        pitch: CesiumMath.toRadians(-90),
-        roll: 0,
+    // Subtle atmosphere glow
+    const atmosphereGeometry = new THREE.SphereGeometry(ATMOSPHERE_RADIUS, 64, 64)
+    const atmosphereMaterial = new THREE.ShaderMaterial({
+      vertexShader: atmosphereVertexShader,
+      fragmentShader: atmosphereFragmentShader,
+      uniforms: {
+        sunDirection: { value: new THREE.Vector3(0.8, 0.3, 0.5).normalize() },
       },
+      transparent: true,
+      side: THREE.BackSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
     })
+    const atmosphere = new THREE.Mesh(atmosphereGeometry, atmosphereMaterial)
+    earthGroup.add(atmosphere)
 
-    const categories = Object.keys(CATEGORY_COLORS) as OrbitalObject['category'][]
-    const collections = Object.fromEntries(
-      categories.map(category => [
-        category,
-        viewer.scene.primitives.add(new PointPrimitiveCollection({ blendOption: BlendOption.OPAQUE })),
-      ]),
-    ) as CategoryCollections
-    collectionsRef.current = collections
-    selectionRef.current = viewer.scene.primitives.add(
-      new PointPrimitiveCollection({ blendOption: BlendOption.OPAQUE }),
-    )
-    trajectoryRef.current = viewer.scene.primitives.add(new PolylineCollection())
+    // ─── Stars ───
+    const stars = createStarfield()
+    scene.add(stars)
+    starsRef.current = stars
 
-    const pickHandler = new ScreenSpaceEventHandler(viewer.scene.canvas)
-    pickHandler.setInputAction((event: { position: Cartesian2 }) => {
-      const picked = viewer.scene.pick(event.position)
-      if (isOrbitalObject(picked?.id)) selectObject(picked.id)
-    }, ScreenSpaceEventType.LEFT_CLICK)
+    // ─── Orbital Objects Group ───
+    const orbitalGroup = new THREE.Group()
+    scene.add(orbitalGroup)
+    orbitalGroupRef.current = orbitalGroup
 
-    let disposed = false
-    const loadImagery = async () => {
-      let baseLayer: ImageryLayer
+    // ─── Selection Group ───
+    const selectionGroup = new THREE.Group()
+    scene.add(selectionGroup)
+    selectionGroupRef.current = selectionGroup
 
-      if (token) {
-        try {
-          const provider = await createWorldImageryAsync({
-            style: IonWorldImageryStyle.AERIAL,
-          })
-          baseLayer = new ImageryLayer(provider)
-        } catch (error) {
-          console.error('Cesium World Imagery failed:', error)
-          if (disposed) return
-          setImageryNotice('Cesium World Imagery unavailable · using aerial fallback')
-          baseLayer = await createFallbackImageryLayer()
+    raycasterRef.current = new THREE.Raycaster()
+
+    // Animation loop
+    const animate = () => {
+      rafRef.current = requestAnimationFrame(animate)
+
+      // Parallax stars
+      if (starsRef.current && cameraRef.current) {
+        starsRef.current.rotation.y = cameraRef.current.rotation.y * 0.1
+        starsRef.current.rotation.x = cameraRef.current.rotation.x * 0.05
+      }
+
+      // Slow Earth rotation
+      if (earthGroupRef.current) {
+        earthGroupRef.current.rotation.y += 0.0001
+      }
+
+      controls.update()
+      renderer.render(scene, camera)
+    }
+    animate()
+
+    // Resize
+    const handleResize = () => {
+      const w = container.clientWidth
+      const h = container.clientHeight
+      camera.aspect = w / h
+      camera.updateProjectionMatrix()
+      renderer.setSize(w, h)
+    }
+    window.addEventListener('resize', handleResize)
+
+    // Click handler
+    const handleClick = (event: MouseEvent) => {
+      const rect = renderer.domElement.getBoundingClientRect()
+      mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+      mouseRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+
+      const raycaster = raycasterRef.current
+      const camera = cameraRef.current
+      const orbitalGroup = orbitalGroupRef.current
+      if (!raycaster || !camera || !orbitalGroup) return
+
+      raycaster.setFromCamera(mouseRef.current, camera)
+      const intersects = raycaster.intersectObjects(orbitalGroup.children, true)
+
+      if (intersects.length > 0) {
+        const userData = intersects[0].object.userData
+        if (userData?.objects && userData.objects.length > 0) {
+          const hitPoint = intersects[0].point
+          let closest = userData.objects[0]
+          let closestDist = Infinity
+          for (const obj of userData.objects) {
+            const r = EARTH_RADIUS + Math.max(0, obj.altitude_km)
+            const lat = THREE.MathUtils.degToRad(obj.latitude)
+            const lon = THREE.MathUtils.degToRad(obj.longitude)
+            const pos = new THREE.Vector3(
+              r * Math.cos(lat) * Math.cos(lon),
+              r * Math.sin(lat),
+              r * Math.cos(lat) * Math.sin(lon)
+            )
+            const dist = pos.distanceToSquared(hitPoint)
+            if (dist < closestDist) {
+              closestDist = dist
+              closest = obj
+            }
+          }
+          selectObject(closest)
         }
       } else {
-        setImageryNotice('Cesium ion token missing · using aerial fallback')
-        baseLayer = await createFallbackImageryLayer()
-      }
-
-      if (!disposed) {
-        baseLayer.brightness = 1
-        baseLayer.contrast = 1.02
-        baseLayer.saturation = 1.04
-        baseLayer.gamma = 1
-        baseLayer.dayAlpha = 1
-        baseLayer.nightAlpha = 0.48
-        viewer.imageryLayers.add(baseLayer)
-
-        const nightLights = new ImageryLayer(
-          new UrlTemplateImageryProvider({
-            url: 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_CityLights_2012/default//GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpg',
-            maximumLevel: 8,
-            credit: new Credit('NASA Global Imagery Browse Services (GIBS)'),
-          }),
-        )
-        nightLights.dayAlpha = 0
-        nightLights.nightAlpha = 0.78
-        nightLights.brightness = 1.16
-        nightLights.contrast = 1.18
-        nightLights.saturation = 0.82
-        nightLights.gamma = 0.9
-        viewer.imageryLayers.add(nightLights)
-        viewer.scene.requestRender()
+        selectObject(null)
       }
     }
-    void loadImagery()
+    renderer.domElement.addEventListener('click', handleClick)
 
     return () => {
-      disposed = true
-      pickHandler.destroy()
-      collectionsRef.current = null
-      pointsRef.current.clear()
-      selectionRef.current = null
-      trajectoryRef.current = null
-      viewerRef.current = null
-      viewer.destroy()
+      cancelAnimationFrame(rafRef.current)
+      window.removeEventListener('resize', handleResize)
+      renderer.domElement.removeEventListener('click', handleClick)
+      controls.dispose()
+      renderer.dispose()
+      container.removeChild(renderer.domElement)
     }
   }, [selectObject])
 
+  // ─── Update Orbital Objects ───
   useEffect(() => {
-    const collections = collectionsRef.current
-    if (!collections) return
+    const group = orbitalGroupRef.current
+    if (!group) return
 
-    const currentIds = new Set<string>()
+    while (group.children.length > 0) {
+      const child = group.children[0]
+      if (child instanceof THREE.Points) {
+        child.geometry.dispose()
+        if (Array.isArray(child.material)) {
+          child.material.forEach(m => m.dispose())
+        } else {
+          child.material.dispose()
+        }
+      }
+      group.remove(child)
+    }
 
-    for (const object of objects.slice(0, 5000)) {
-      const collection = collections[object.category]
-      if (!collection) continue
-      currentIds.add(object.norad_id)
-      const position = Cartesian3.fromDegrees(
-        object.longitude,
-        object.latitude,
-        Math.max(0, object.altitude_km) * 1000,
-      )
-      const existing = pointsRef.current.get(object.norad_id)
+    const byCategory: Record<OrbitalObject['category'], OrbitalObject[]> = {
+      active_satellite: [],
+      debris: [],
+      rocket_body: [],
+      asteroid: [],
+    }
 
-      if (existing?.category === object.category) {
-        existing.point.position = position
-        existing.point.id = object
-        continue
+    for (const obj of objects.slice(0, 5000)) {
+      if (byCategory[obj.category]) {
+        byCategory[obj.category].push(obj)
+      }
+    }
+
+    for (const [category, items] of Object.entries(byCategory)) {
+      if (items.length === 0) continue
+
+      const geometry = new THREE.BufferGeometry()
+      const positions = new Float32Array(items.length * 3)
+      const colors = new Float32Array(items.length * 3)
+
+      const catColor = CATEGORY_COLORS[category as OrbitalObject['category']]
+
+      for (let i = 0; i < items.length; i++) {
+        const obj = items[i]
+        const r = EARTH_RADIUS + Math.max(0, obj.altitude_km)
+        const lat = THREE.MathUtils.degToRad(obj.latitude)
+        const lon = THREE.MathUtils.degToRad(obj.longitude)
+
+        positions[i * 3] = r * Math.cos(lat) * Math.cos(lon)
+        positions[i * 3 + 1] = r * Math.sin(lat)
+        positions[i * 3 + 2] = r * Math.cos(lat) * Math.sin(lon)
+
+        colors[i * 3] = catColor.r
+        colors[i * 3 + 1] = catColor.g
+        colors[i * 3 + 2] = catColor.b
       }
 
-      if (existing) collections[existing.category].remove(existing.point)
-      const point = collection.add({
-        position,
-        pixelSize: CATEGORY_SIZES[object.category],
-        color: CATEGORY_COLORS[object.category],
-        outlineColor: Color.fromCssColorString('#171513'),
-        outlineWidth: 1,
-        scaleByDistance: new NearFarScalar(1_000_000, 1.8, 45_000_000, 0.75),
-        id: object,
-      })
-      pointsRef.current.set(object.norad_id, { category: object.category, point })
-    }
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+      geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
 
-    for (const [noradId, existing] of pointsRef.current) {
-      if (currentIds.has(noradId)) continue
-      collections[existing.category].remove(existing.point)
-      pointsRef.current.delete(noradId)
+      const material = new THREE.PointsMaterial({
+        size: CATEGORY_SIZES[category as OrbitalObject['category']],
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.9,
+        sizeAttenuation: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+
+      const points = new THREE.Points(geometry, material)
+      points.userData = { category, objects: items }
+      points.visible = activeFilters.has(category)
+      group.add(points)
     }
-    viewerRef.current?.scene.requestRender()
   }, [objects])
 
+  // ─── Update Filters ───
   useEffect(() => {
-    const collections = collectionsRef.current
-    if (!collections) return
-    for (const [category, collection] of Object.entries(collections)) {
-      collection.show = activeFilters.has(category)
+    const group = orbitalGroupRef.current
+    if (!group) return
+
+    for (const child of group.children) {
+      if (child instanceof THREE.Points) {
+        const cat = child.userData.category as OrbitalObject['category']
+        child.visible = activeFilters.has(cat)
+      }
     }
-    viewerRef.current?.scene.requestRender()
   }, [activeFilters])
 
+  // ─── Update Selection ───
   useEffect(() => {
-    const selection = selectionRef.current
-    const trajectory = trajectoryRef.current
-    if (!selection || !trajectory) return
+    const group = selectionGroupRef.current
+    if (!group) return
 
-    selection.removeAll()
-    trajectory.removeAll()
-    if (!selectedObject) {
-      viewerRef.current?.scene.requestRender()
-      return
+    while (group.children.length > 0) {
+      const child = group.children[0]
+      if (child instanceof THREE.Mesh || child instanceof THREE.Points || child instanceof THREE.Line) {
+        child.geometry.dispose()
+        if (Array.isArray(child.material)) {
+          child.material.forEach(m => m.dispose())
+        } else {
+          child.material.dispose()
+        }
+      }
+      group.remove(child)
     }
 
-    selection.add({
-      position: Cartesian3.fromDegrees(
-        selectedObject.longitude,
-        selectedObject.latitude,
-        Math.max(0, selectedObject.altitude_km) * 1000,
-      ),
-      pixelSize: 10,
-      color: Color.fromCssColorString('#d2c6ae'),
-      outlineColor: Color.fromCssColorString('#2f80c2'),
-      outlineWidth: 2,
-      id: selectedObject,
+    if (!selectedObject) return
+
+    const r = EARTH_RADIUS + Math.max(0, selectedObject.altitude_km)
+    const lat = THREE.MathUtils.degToRad(selectedObject.latitude)
+    const lon = THREE.MathUtils.degToRad(selectedObject.longitude)
+    const pos = new THREE.Vector3(
+      r * Math.cos(lat) * Math.cos(lon),
+      r * Math.sin(lat),
+      r * Math.cos(lat) * Math.sin(lon)
+    )
+
+    // Highlight ring
+    const ringGeometry = new THREE.RingGeometry(12, 18, 32)
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color: '#d2c6ae',
+      transparent: true,
+      opacity: 0.8,
+      side: THREE.DoubleSide,
     })
-    trajectory.add({
-      positions: createTrajectory(selectedObject),
-      width: 1.25,
-      material: Color.fromCssColorString('#4c93c3').withAlpha(0.72),
+    const ring = new THREE.Mesh(ringGeometry, ringMaterial)
+    ring.position.copy(pos)
+    ring.lookAt(0, 0, 0)
+    group.add(ring)
+
+    // Trajectory
+    const trajGeometry = createTrajectory(selectedObject)
+    const trajMaterial = new THREE.LineBasicMaterial({
+      color: '#4c93c3',
+      transparent: true,
+      opacity: 0.5,
     })
-    viewerRef.current?.scene.requestRender()
+    const trajectory = new THREE.Line(trajGeometry, trajMaterial)
+    group.add(trajectory)
   }, [selectedObject])
 
   return (
-    <div className="absolute inset-0">
-      <ProceduralStars />
-      <div ref={containerRef} className="absolute inset-0" />
-      {imageryNotice && (
-        <div className="pointer-events-none absolute bottom-5 left-5 z-10 max-w-xs rounded border border-amber/30 bg-panel/90 px-3 py-2 font-mono text-[10px] text-amber">
-          {imageryNotice}
-        </div>
-      )}
-    </div>
+    <div ref={containerRef} className="absolute inset-0" style={{ background: '#02040a' }} />
   )
-}
-
-async function createFallbackImageryLayer() {
-  try {
-    const provider = await ArcGisMapServerImageryProvider.fromUrl(
-      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer',
-      { enablePickFeatures: false },
-    )
-    return new ImageryLayer(provider)
-  } catch (error) {
-    console.error('Aerial imagery fallback failed:', error)
-    return createNasaBlueMarbleLayer()
-  }
-}
-
-function createNasaBlueMarbleLayer() {
-  return new ImageryLayer(
-    new UrlTemplateImageryProvider({
-      url: 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/BlueMarble_NextGeneration/default//GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpeg',
-      maximumLevel: 8,
-      credit: new Credit('NASA Global Imagery Browse Services (GIBS)'),
-    }),
-  )
-}
-
-function ProceduralStars() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-
-    const draw = () => {
-      const width = canvas.clientWidth
-      const height = canvas.clientHeight
-      const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5)
-      canvas.width = Math.max(1, Math.round(width * pixelRatio))
-      canvas.height = Math.max(1, Math.round(height * pixelRatio))
-
-      const context = canvas.getContext('2d')
-      if (!context) return
-      context.fillStyle = '#05070b'
-      context.fillRect(0, 0, canvas.width, canvas.height)
-
-      let seed = 0x4f1bbcdc
-      const random = () => {
-        seed = (seed * 1664525 + 1013904223) >>> 0
-        return seed / 0x100000000
-      }
-      const starCount = Math.max(180, Math.round((width * height) / 7200))
-
-      for (let index = 0; index < starCount; index++) {
-        const x = random() * canvas.width
-        const y = random() * canvas.height
-        const brightness = 0.32 + Math.pow(random(), 2.5) * 0.62
-        const radius = (0.38 + Math.pow(random(), 4) * 0.72) * pixelRatio
-        const warmth = random()
-        context.beginPath()
-        context.arc(x, y, radius, 0, Math.PI * 2)
-        context.fillStyle = warmth > 0.9
-          ? `rgba(238, 222, 194, ${brightness})`
-          : `rgba(225, 231, 235, ${brightness})`
-        context.fill()
-      }
-    }
-
-    draw()
-    const observer = new ResizeObserver(draw)
-    observer.observe(canvas)
-    return () => observer.disconnect()
-  }, [])
-
-  return <canvas ref={canvasRef} aria-hidden="true" className="absolute inset-0 h-full w-full" />
 }
