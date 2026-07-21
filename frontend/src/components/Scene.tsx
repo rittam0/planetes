@@ -18,10 +18,10 @@ const CATEGORY_COLORS: Record<OrbitalObject['category'], THREE.Color> = {
 }
 
 const CATEGORY_SIZES: Record<OrbitalObject['category'], number> = {
-  active_satellite: 4,
-  debris: 3,
+  active_satellite: 7,
+  debris: 2,
   rocket_body: 4,
-  asteroid: 6,
+  asteroid: 8,
 }
 
 // ─── Procedural Earth Texture — Pale Blue, Light Continents ───
@@ -250,7 +250,7 @@ function createStarfield() {
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
 
   const material = new THREE.PointsMaterial({
-    size: 1.2,
+    size: 1.8,
     vertexColors: true,
     transparent: true,
     opacity: 0.85,
