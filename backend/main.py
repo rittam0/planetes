@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import objects, asteroids, conjunctions, investigate
+from routers import objects, asteroids, conjunctions, investigate, metrics
 
 app = FastAPI(title="Planetes Backend", version="1.0.0")
 
@@ -16,6 +16,7 @@ app.include_router(objects.router)
 app.include_router(asteroids.router)
 app.include_router(conjunctions.router)
 app.include_router(investigate.router)
+app.include_router(metrics.router)
 
 @app.get("/")
 async def root():
