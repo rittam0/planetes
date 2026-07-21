@@ -4,13 +4,13 @@ from routers import objects, asteroids, conjunctions, investigate, metrics
 
 app = FastAPI(
     title="Planetes Backend",
-    description="Autonomous Space Intelligence Platform - LangGraph + SGP4 + NASA NeoWs + KeepTrack",
+    description="Autonomous Space Intelligence Platform - SGP4 + NASA NeoWs + KeepTrack",
     version="1.0.0"
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "https://planetes.vercel.app"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -27,13 +27,12 @@ async def root():
     return {
         "status": "Planetes API running",
         "version": "1.0.0",
-        "architecture": "FastAPI + LangGraph + SGP4 + async httpx",
         "features": [
+            "Live KeepTrack satellite catalog (30+ satellites with real TLEs)",
             "Live NASA NeoWs asteroid tracking",
-            "KeepTrack satellite catalog integration",
-            "SGP4 orbital propagation",
-            "LangGraph multi-agent AI investigation",
-            "Physics-informed conjunction risk scoring"
+            "SGP4 orbital propagation on real TLE data",
+            "Physics-informed conjunction risk scoring",
+            "Structured AI investigation reports"
         ]
     }
 

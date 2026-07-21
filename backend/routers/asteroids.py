@@ -8,14 +8,13 @@ router = APIRouter(prefix="/api")
 
 def _mock_asteroids():
     names = ["Apophis", "Bennu", "Ryugu", "Didymos", "Toutatis", "Eros", "Itokawa", "Ceres", "Vesta", "Pallas"]
-    objects = []
+    objs = []
     for i in range(10):
-        distance_km = random.uniform(500000, 50000000)
-        objects.append({
+        objs.append({
             "norad_id": f"AST-{1000+i}",
             "name": f"{random.choice(names)}-{i+1}",
             "category": "asteroid",
-            "altitude_km": round(distance_km, 0),
+            "altitude_km": round(random.uniform(500000, 50000000), 0),
             "velocity_kms": round(random.uniform(5, 30), 2),
             "latitude": round(random.uniform(-90, 90), 2),
             "longitude": round(random.uniform(-180, 180), 2),
@@ -28,16 +27,16 @@ def _mock_asteroids():
             "mission": "Near-Earth Object",
             "diameter_km": round(random.uniform(0.1, 50), 2),
             "hazardous": random.choice([True, False]),
-            "approach_date": f"{random.randint(2024, 2030)}-{random.randint(1,12):02d}-{random.randint(1,28):02d}"
+            "approach_date": f"{random.randint(2024, 2030)}-{random.randint(1,12):02d}-{random.randint(1,28):02d}",
+            "source": "mock"
         })
-    return objects
+    return objs
 
 @router.get("/asteroids")
 async def get_asteroids():
-    start_time = time.time()
+    start = time.time()
     today = datetime.now().strftime("%Y-%m-%d")
     week_later = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
-    
     try:
         data = await fetch_asteroid_feed(today, week_later)
         if data and "near_earth_objects" in data:
@@ -66,25 +65,23 @@ async def get_asteroids():
                         "approach_date": approach.get("close_approach_date", ""),
                         "source": "nasa"
                     })
-            latency = round((time.time() - start_time) * 1000, 2)
+            api_latency = data.get("_api_latency_ms", 0)
+            total_latency = round((time.time() - start) * 1000, 2)
             return {
                 "objects": neos,
                 "total": len(neos),
                 "source": "nasa",
-                "api_latency_ms": latency,
-                "api_status": "success",
+                "api_latency_ms": total_latency,
+                "nasa_api_latency_ms": api_latency,
                 "date_range": f"{today} to {week_later}"
             }
     except Exception as e:
-        print(f"[Asteroids] NASA API failed: {e}")
-    
-    objects = _mock_asteroids()
-    latency = round((time.time() - start_time) * 1000, 2)
+        print(f"[Asteroids] API failed: {e}")
+    objs = _mock_asteroids()
     return {
-        "objects": objects,
-        "total": len(objects),
+        "objects": objs,
+        "total": len(objs),
         "source": "mock",
-        "api_latency_ms": latency,
-        "api_status": "fallback",
+        "api_latency_ms": round((time.time() - start) * 1000, 2),
         "warning": "NASA API unavailable. Using mock asteroid data."
     }
