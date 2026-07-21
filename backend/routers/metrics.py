@@ -18,15 +18,16 @@ async def get_metrics():
         "memory_mb": round(psutil.Process().memory_info().rss / 1024 / 1024, 2),
         "cpu_percent": psutil.cpu_percent(interval=0.1),
         "version": "1.0.0",
-        "architecture": "FastAPI + SGP4 + async httpx + real API integration",
-        "live_apis": ["keeptrack", "nasa"],
+        "architecture": "FastAPI + LangGraph + SGP4 + async httpx + real API integration",
+        "live_apis": ["keeptrack", "nasa", "groq"],
         "features": [
             "Real-time SGP4 orbital propagation",
             "Physics-informed conjunction risk scoring",
             "Live KeepTrack satellite catalog",
             "Live NASA NeoWs asteroid tracking",
-            "Deterministic AI investigation pipeline",
-            "Graceful API fallback"
+            "LangGraph AI investigation pipeline",
+            "Groq LLM structured report generation",
+            "Deterministic fallback for 100% uptime"
         ]
     }
 

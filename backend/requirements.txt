@@ -6,4 +6,3 @@ psutil
 sgp4
 langgraph
 pydantic
-numpy

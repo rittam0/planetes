@@ -1,4 +1,3 @@
-"""SGP4 orbital propagation and conjunction risk scoring."""
 import time
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone
