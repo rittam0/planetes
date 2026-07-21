@@ -1,6 +1,5 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from services.keeptrack import fetch_catalog, fetch_satellite
-from datetime import datetime
 import random
 import math
 
@@ -124,26 +123,28 @@ async def get_objects(limit: int = 5000, search: str = ""):
         if data and isinstance(data, list) and len(data) > 0:
             objects = []
             for sat in data[:limit]:
+                apogee = sat.get("APOGEE") or sat.get("apogee") or sat.get("MEAN_MOTION", 0)
+                alt = apogee if isinstance(apogee, (int, float)) and apogee > 100 else random.randint(300, 2000)
                 objects.append({
-                    "norad_id": str(sat.get("NORAD_CAT_ID", "unknown")),
-                    "name": sat.get("NAME", "Unknown"),
+                    "norad_id": str(sat.get("NORAD_CAT_ID") or sat.get("norad_id") or sat.get("id", "unknown")),
+                    "name": sat.get("NAME") or sat.get("name") or sat.get("OBJECT_NAME", "Unknown"),
                     "category": "active_satellite",
-                    "altitude_km": sat.get("APOGEE", random.randint(300, 2000)),
+                    "altitude_km": int(alt),
                     "velocity_kms": 7.66,
                     "latitude": round(random.uniform(-90, 90), 2),
                     "longitude": round(random.uniform(-180, 180), 2),
-                    "inclination_deg": sat.get("INCLINATION", 51.6),
-                    "period_min": sat.get("PERIOD", 92.7),
-                    "operator": sat.get("OPERATOR", "Unknown"),
-                    "country": sat.get("COUNTRY_CODE", "Unknown"),
-                    "launch_date": sat.get("LAUNCH_DATE", "Unknown"),
-                    "mass_kg": sat.get("MASS", "Unknown"),
-                    "mission": sat.get("MISSION", "Unknown")
+                    "inclination_deg": sat.get("INCLINATION") or sat.get("inclination") or 51.6,
+                    "period_min": sat.get("PERIOD") or sat.get("period") or 92.7,
+                    "operator": sat.get("OPERATOR") or sat.get("operator", "Unknown"),
+                    "country": sat.get("COUNTRY_CODE") or sat.get("country_code", "Unknown"),
+                    "launch_date": sat.get("LAUNCH_DATE") or sat.get("launch_date", "Unknown"),
+                    "mass_kg": sat.get("MASS") or sat.get("mass", "Unknown"),
+                    "mission": sat.get("MISSION") or sat.get("mission", "Unknown")
                 })
             return {"objects": objects, "total": len(objects), "source": "keeptrack"}
     except Exception as e:
-        pass
-
+        print(f"[Objects] Real API failed: {e}")
+    
     objects = _mock_objects()
     if search:
         objects = [o for o in objects if search.lower() in o.get("name", "").lower()]
@@ -158,21 +159,24 @@ async def get_objects(limit: int = 5000, search: str = ""):
 async def get_object_detail(norad_id: str):
     try:
         sat = await fetch_satellite(norad_id)
-        return sat
+        if sat:
+            return sat
     except Exception as e:
-        return {
-            "norad_id": norad_id,
-            "name": f"Object-{norad_id}",
-            "category": "active_satellite",
-            "altitude_km": random.randint(300, 2000),
-            "velocity_kms": 7.66,
-            "latitude": round(random.uniform(-90, 90), 2),
-            "longitude": round(random.uniform(-180, 180), 2),
-            "inclination_deg": 51.6,
-            "period_min": 92.7,
-            "operator": "Unknown",
-            "country": "Unknown",
-            "launch_date": "Unknown",
-            "mass_kg": "Unknown",
-            "mission": "Unknown"
-        }
+        print(f"[Objects] Detail fetch failed: {e}")
+    
+    return {
+        "norad_id": norad_id,
+        "name": f"Object-{norad_id}",
+        "category": "active_satellite",
+        "altitude_km": random.randint(300, 2000),
+        "velocity_kms": 7.66,
+        "latitude": round(random.uniform(-90, 90), 2),
+        "longitude": round(random.uniform(-180, 180), 2),
+        "inclination_deg": 51.6,
+        "period_min": 92.7,
+        "operator": "Unknown",
+        "country": "Unknown",
+        "launch_date": "Unknown",
+        "mass_kg": "Unknown",
+        "mission": "Unknown"
+    }
