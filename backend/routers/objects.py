@@ -1,7 +1,9 @@
 from fastapi import APIRouter
-from services.keeptrack import fetch_catalog, fetch_satellite
+from services.keeptrack import fetch_catalog, fetch_satellite, fetch_tle
+from services.sgp4_service import propagate_tle
 import random
 import math
+import time
 
 router = APIRouter(prefix="/api")
 
@@ -118,6 +120,10 @@ def _mock_objects():
 
 @router.get("/objects")
 async def get_objects(limit: int = 5000, search: str = ""):
+    start_time = time.time()
+    source = "mock"
+    api_error = None
+    
     try:
         data = await fetch_catalog(limit=min(limit, 100))
         if data and isinstance(data, list) and len(data) > 0:
@@ -139,28 +145,60 @@ async def get_objects(limit: int = 5000, search: str = ""):
                     "country": sat.get("COUNTRY_CODE") or sat.get("country_code", "Unknown"),
                     "launch_date": sat.get("LAUNCH_DATE") or sat.get("launch_date", "Unknown"),
                     "mass_kg": sat.get("MASS") or sat.get("mass", "Unknown"),
-                    "mission": sat.get("MISSION") or sat.get("mission", "Unknown")
+                    "mission": sat.get("MISSION") or sat.get("mission", "Unknown"),
+                    "source": "keeptrack"
                 })
-            return {"objects": objects, "total": len(objects), "source": "keeptrack"}
+            latency = round((time.time() - start_time) * 1000, 2)
+            return {
+                "objects": objects,
+                "total": len(objects),
+                "source": "keeptrack",
+                "api_latency_ms": latency,
+                "api_status": "success"
+            }
     except Exception as e:
+        api_error = str(e)
         print(f"[Objects] Real API failed: {e}")
     
     objects = _mock_objects()
     if search:
         objects = [o for o in objects if search.lower() in o.get("name", "").lower()]
+    
+    latency = round((time.time() - start_time) * 1000, 2)
     return {
         "objects": objects[:limit],
         "total": len(objects),
         "source": "mock",
+        "api_latency_ms": latency,
+        "api_status": "fallback",
+        "api_error": api_error,
         "warning": "Using realistic mock data. Add KEEPTRACK_API_KEY to .env for live data."
     }
 
 @router.get("/objects/{norad_id}")
 async def get_object_detail(norad_id: str):
+    start_time = time.time()
+    
     try:
         sat = await fetch_satellite(norad_id)
         if sat:
-            return sat
+            tle = await fetch_tle(norad_id)
+            propagated = None
+            if tle and tle.get("TLE_LINE1") and tle.get("TLE_LINE2"):
+                propagated = propagate_tle(tle["TLE_LINE1"], tle["TLE_LINE2"])
+            
+            latency = round((time.time() - start_time) * 1000, 2)
+            result = {
+                "norad_id": norad_id,
+                "name": sat.get("NAME") or sat.get("name", "Unknown"),
+                "category": "active_satellite",
+                "source": "keeptrack",
+                "api_latency_ms": latency,
+                "raw_data": sat
+            }
+            if propagated:
+                result["sgp4_propagation"] = propagated
+            return result
     except Exception as e:
         print(f"[Objects] Detail fetch failed: {e}")
     
@@ -178,5 +216,6 @@ async def get_object_detail(norad_id: str):
         "country": "Unknown",
         "launch_date": "Unknown",
         "mass_kg": "Unknown",
-        "mission": "Unknown"
+        "mission": "Unknown",
+        "source": "mock"
     }

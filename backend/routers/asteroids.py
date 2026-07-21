@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from services.nasa import fetch_asteroid_feed
 from datetime import datetime, timedelta
 import random
+import time
 
 router = APIRouter(prefix="/api")
 
@@ -33,6 +34,7 @@ def _mock_asteroids():
 
 @router.get("/asteroids")
 async def get_asteroids():
+    start_time = time.time()
     today = datetime.now().strftime("%Y-%m-%d")
     week_later = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
     
@@ -61,11 +63,28 @@ async def get_asteroids():
                         "mission": "Near-Earth Object",
                         "diameter_km": item.get("estimated_diameter", {}).get("kilometers", {}).get("estimated_diameter_max", 0),
                         "hazardous": item.get("is_potentially_hazardous_asteroid", False),
-                        "approach_date": approach.get("close_approach_date", "")
+                        "approach_date": approach.get("close_approach_date", ""),
+                        "source": "nasa"
                     })
-            return {"objects": neos, "total": len(neos), "source": "nasa"}
+            latency = round((time.time() - start_time) * 1000, 2)
+            return {
+                "objects": neos,
+                "total": len(neos),
+                "source": "nasa",
+                "api_latency_ms": latency,
+                "api_status": "success",
+                "date_range": f"{today} to {week_later}"
+            }
     except Exception as e:
         print(f"[Asteroids] NASA API failed: {e}")
     
     objects = _mock_asteroids()
-    return {"objects": objects, "total": len(objects), "source": "mock", "warning": "NASA API unavailable. Using mock asteroid data."}
+    latency = round((time.time() - start_time) * 1000, 2)
+    return {
+        "objects": objects,
+        "total": len(objects),
+        "source": "mock",
+        "api_latency_ms": latency,
+        "api_status": "fallback",
+        "warning": "NASA API unavailable. Using mock asteroid data."
+    }
