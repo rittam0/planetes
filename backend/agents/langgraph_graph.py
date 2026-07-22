@@ -4,6 +4,7 @@ import time
 from datetime import datetime
 from services.sgp4_service import compute_conjunction_risk
 from services.groq_llm import generate_report
+from services.rag_service import retrieve_context
 
 class InvestigationState(TypedDict):
     conjunction_id: str
@@ -12,6 +13,7 @@ class InvestigationState(TypedDict):
     object_b: Optional[Dict[str, Any]]
     risk_analysis: Optional[Dict[str, Any]]
     llm_report: Optional[Dict[str, Any]]
+    rag_context: Optional[str]
     sources: List[str]
     agent_steps: List[Dict[str, Any]]
     report: Optional[str]
@@ -48,13 +50,22 @@ def risk_analysis_node(state: InvestigationState) -> InvestigationState:
     risk = compute_conjunction_risk(state["object_a"], state["object_b"])
     state["risk_analysis"] = risk
     state["risk_level"] = risk["risk_level"]
+    
+    rag_start = time.time()
+    query = f"conjunction risk {risk['risk_level']} {state['object_a']['name']} {state['object_b']['name']}"
+    rag_context = retrieve_context(query, top_k=2)
+    state["rag_context"] = rag_context
+    rag_latency = round((time.time() - rag_start) * 1000, 2)
+    
     state["sources"].append("NASA CARA Conjunction Assessment Guidelines")
+    state["sources"].append("RAG: Orbital Mechanics Corpus")
     latency = round((time.time() - start) * 1000, 2)
     state["agent_steps"].append({
         "agent": "Risk Analyst",
-        "action": "Computed collision probability using SGP4 propagation + physics-informed scoring",
-        "result": f"Probability: {risk['collision_probability']}. Risk score: {risk['risk_score']}. Regime: {risk['regime']}",
-        "latency_ms": latency
+        "action": "Computed collision probability using SGP4 propagation + physics-informed scoring + RAG context retrieval",
+        "result": f"Probability: {risk['collision_probability']}. Risk score: {risk['risk_score']}. Regime: {risk['regime']}. RAG docs retrieved in {rag_latency}ms",
+        "latency_ms": latency,
+        "rag_latency_ms": rag_latency
     })
     return state
 
@@ -80,7 +91,6 @@ def report_generation_node(state: InvestigationState) -> InvestigationState:
     )
     state["llm_enabled"] = False
     
-    # Try Groq LLM
     llm_report = None
     try:
         import asyncio
@@ -90,7 +100,8 @@ def report_generation_node(state: InvestigationState) -> InvestigationState:
             risk,
             state["object_a"],
             state["object_b"],
-            state["question"]
+            state["question"],
+            rag_context=state.get("rag_context", "")
         ))
     except Exception as e:
         print(f"[LangGraph] LLM fallback: {e}")
@@ -105,7 +116,7 @@ def report_generation_node(state: InvestigationState) -> InvestigationState:
     latency = round((time.time() - start) * 1000, 2)
     state["agent_steps"].append({
         "agent": "Report Generator",
-        "action": "LLM-structured report via Groq" if state["llm_enabled"] else "Deterministic template fallback",
+        "action": "LLM-structured report via Groq with RAG augmentation" if state["llm_enabled"] else "Deterministic template fallback",
         "result": state["report"],
         "latency_ms": latency
     })
@@ -130,6 +141,7 @@ def run_investigation(conjunction_id: str, question: str) -> Dict[str, Any]:
         "object_b": None,
         "risk_analysis": None,
         "llm_report": None,
+        "rag_context": None,
         "sources": [],
         "agent_steps": [],
         "report": None,
@@ -140,4 +152,6 @@ def run_investigation(conjunction_id: str, question: str) -> Dict[str, Any]:
     }
     result = investigation_graph.invoke(initial_state)
     result["latency_ms"] = round((time.time() - start) * 1000, 2)
+    result["graph_nodes"] = ["data_fetch", "risk_analysis", "report_generation"]
+    result["state_transitions"] = 3
     return result

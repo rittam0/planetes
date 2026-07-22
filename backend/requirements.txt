@@ -5,4 +5,5 @@ python-dotenv
 psutil
 sgp4
 langgraph
+numpy
 pydantic
