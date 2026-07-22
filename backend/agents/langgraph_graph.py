@@ -53,9 +53,8 @@ def risk_analysis_node(state: InvestigationState) -> InvestigationState:
     
     rag_start = time.time()
     query = f"conjunction risk {risk['risk_level']} {state['object_a']['name']} {state['object_b']['name']}"
-    rag_context = retrieve_context(query, top_k=2)
+    rag_context, rag_latency = retrieve_context(query, top_k=2)
     state["rag_context"] = rag_context
-    rag_latency = round((time.time() - rag_start) * 1000, 2)
     
     state["sources"].append("NASA CARA Conjunction Assessment Guidelines")
     state["sources"].append("RAG: Orbital Mechanics Corpus")
@@ -93,16 +92,14 @@ def report_generation_node(state: InvestigationState) -> InvestigationState:
     
     llm_report = None
     try:
-        import asyncio
-        loop = asyncio.get_event_loop()
-        llm_report = loop.run_until_complete(generate_report(
+        llm_report = generate_report(
             state["conjunction_id"],
             risk,
             state["object_a"],
             state["object_b"],
             state["question"],
             rag_context=state.get("rag_context", "")
-        ))
+        )
     except Exception as e:
         print(f"[LangGraph] LLM fallback: {e}")
     
