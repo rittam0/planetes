@@ -282,7 +282,6 @@ export function Scene() {
     selectionGroupRef.current = selectionGroup
 
     raycasterRef.current = new THREE.Raycaster()
-    raycasterRef.current.params.Points = { threshold: 80 }
 
     const animate = () => {
       rafRef.current = requestAnimationFrame(animate)
@@ -310,7 +309,7 @@ export function Scene() {
     }
     window.addEventListener('resize', handleResize)
 
-    // ─── CLICK HANDLER — Direct point-buffer index lookup ───
+    // ─── CLICK HANDLER — Direct instanced-marker index lookup ───
     const handleClick = (event: MouseEvent) => {
       const rect = renderer.domElement.getBoundingClientRect()
       mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
@@ -322,16 +321,16 @@ export function Scene() {
       if (!raycaster || !camera || !orbitalGroup) return
 
       raycaster.setFromCamera(mouseRef.current, camera)
-      const pointClouds = orbitalGroup.children.filter(
-        child => child instanceof THREE.Points && child.visible
+      const markerLayers = orbitalGroup.children.filter(
+        child => child instanceof THREE.InstancedMesh && child.visible
       )
-      const intersects = raycaster.intersectObjects(pointClouds, false)
+      const intersects = raycaster.intersectObjects(markerLayers, false)
 
       if (intersects.length > 0) {
         const intersection = intersects[0]
-        const pointIndex = intersection.index
-        const pointObjects = intersection.object.userData.objects as OrbitalObject[]
-        const hitObject = pointIndex === undefined ? undefined : pointObjects[pointIndex]
+        const instanceId = intersection.instanceId
+        const instanceObjects = intersection.object.userData.objects as OrbitalObject[]
+        const hitObject = instanceId === undefined ? undefined : instanceObjects[instanceId]
         if (hitObject) {
           selectObject(hitObject)
         }
@@ -351,7 +350,7 @@ export function Scene() {
     }
   }, [selectObject])
 
-  // ─── Update Orbital Objects — Custom Shader Points ───
+  // ─── Update Orbital Objects — Custom Shader Points + Instanced 3D Markers ───
   useEffect(() => {
     const group = orbitalGroupRef.current
     if (!group) return
@@ -392,7 +391,7 @@ export function Scene() {
     }
 
     for (const [category, items] of Object.entries(byCategory)) {
-      if (items.length === 0 || !activeFilters.has(category)) continue
+      if (items.length === 0) continue
 
       // ─── Custom Shader Points ───
       const geometry = new THREE.BufferGeometry()
@@ -434,9 +433,45 @@ export function Scene() {
 
       const points = new THREE.Points(geometry, material)
       points.userData = { category, objects: items }
+      points.visible = activeFilters.has(category)
       group.add(points)
+
+      const markerGeometry = new THREE.SphereGeometry(80, 8, 8)
+      const markerMaterial = new THREE.MeshBasicMaterial({
+        color: catColor,
+        visible: true,
+        transparent: false,
+        opacity: 1.0,
+      })
+      const markers = new THREE.InstancedMesh(
+        markerGeometry, markerMaterial, items.length
+      )
+      const matrix = new THREE.Matrix4()
+      for (let i = 0; i < items.length; i++) {
+        matrix.makeTranslation(
+          positions[i * 3],
+          positions[i * 3 + 1],
+          positions[i * 3 + 2],
+        )
+        markers.setMatrixAt(i, matrix)
+      }
+      markers.instanceMatrix.needsUpdate = true
+      markers.userData = { category, objects: items }
+      markers.visible = activeFilters.has(category)
+      group.add(markers)
     }
-  }, [objects, activeFilters])
+  }, [objects])
+
+  // ─── Update Filters ───
+  useEffect(() => {
+    const group = orbitalGroupRef.current
+    if (!group) return
+
+    for (const child of group.children) {
+      const category = child.userData.category
+      if (category) child.visible = activeFilters.has(category)
+    }
+  }, [activeFilters])
 
   // ─── Update Selection ───
   useEffect(() => {

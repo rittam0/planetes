@@ -20,12 +20,17 @@ export function useObjects() {
         }
         params.set('limit', '2000')
 
-        const res = await fetch(`${API_BASE}/objects?${params}`)
+        const [res, asteroidRes] = await Promise.all([
+          fetch(`${API_BASE}/objects?${params}`),
+          fetch(`${API_BASE}/asteroids`),
+        ])
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
 
         const data = await res.json()
-        setObjects(data.objects || [])
-        setTotalObjects(data.total || 0)
+        const asteroidData = asteroidRes.ok ? await asteroidRes.json() : { objects: [] }
+        const loadedObjects = [...(data.objects || []), ...(asteroidData.objects || [])]
+        setObjects(loadedObjects)
+        setTotalObjects(loadedObjects.length)
         setError(null)
         hasLoggedFailure.current = false
       } catch (err) {
