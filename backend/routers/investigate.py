@@ -1,56 +1,74 @@
+from datetime import datetime, timezone
+from typing import Optional
+from uuid import uuid4
+
 from fastapi import APIRouter
-from pydantic import BaseModel
-import random
-import time
-from datetime import datetime
+from pydantic import BaseModel, ConfigDict
+
 from agents.langgraph_graph import run_investigation
-from services.rag_service import get_corpus_stats
-from routers.metrics import record_call, record_latency, record_llm, record_error
+from routers.metrics import record_call, record_latency, record_llm
 
 router = APIRouter(prefix="/api")
 
+
+class SelectedObject(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    norad_id: str
+    name: str
+    category: str
+    source: str
+    altitude_km: Optional[float] = None
+    velocity_kms: Optional[float] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    inclination_deg: Optional[float] = None
+    period_min: Optional[float] = None
+    approach_date: Optional[str] = None
+    real_miss_distance_km: Optional[float] = None
+    diameter_km: Optional[float] = None
+    hazardous: Optional[bool] = None
+    visualization_mode: Optional[str] = None
+    position_accuracy: Optional[str] = None
+    position_mode: Optional[str] = None
+    source_epoch: Optional[str] = None
+    retrieved_at: Optional[str] = None
+    data_status: Optional[str] = None
+
+
 class InvestigateRequest(BaseModel):
-    conjunction_id: str
-    question: str = "Analyze this conjunction risk"
+    selected_object: SelectedObject
+
 
 @router.post("/investigate")
 async def investigate(req: InvestigateRequest):
-    """LangGraph multi-agent investigation with RAG-augmented LLM report generation"""
-    start = time.time()
+    """Run a stateful investigation workflow over the supplied selected object."""
     record_call("investigate")
-    
-    result = run_investigation(req.conjunction_id, req.question)
-    
-    total_latency = round((time.time() - start) * 1000, 2)
-    
+    result = run_investigation(req.selected_object.model_dump())
+
     if result.get("llm_enabled"):
-        llm_latency = result.get("llm_report", {}).get("llm_latency_ms", 0)
-        if llm_latency:
-            record_latency("groq", llm_latency)
+        latency = result.get("llm_latency_ms")
+        if latency is not None:
+            record_latency("groq", latency)
         record_llm(success=True)
     else:
         record_llm(success=False)
-    
+
     return {
-        "investigation_id": f"inv-{req.conjunction_id}-{random.randint(1000,9999)}",
-        "conjunction_id": req.conjunction_id,
-        "question": req.question,
+        "investigation_id": f"inv-{uuid4().hex[:12]}",
+        "object_id": req.selected_object.norad_id,
         "report": result["report"],
-        "llm_report": result.get("llm_report"),
-        "llm_enabled": result.get("llm_enabled", False),
-        "rag_context": result.get("rag_context"),
-        "agents": result["agent_steps"],
+        "structured_report": result["structured_report"],
+        "analysis_type": result["analysis"]["analysis_type"],
+        "llm_enabled": result["llm_enabled"],
+        "llm_status": result["llm_status"],
+        "llm_latency_ms": result.get("llm_latency_ms"),
+        "workflow_steps": result["workflow_steps"],
         "sources": result["sources"],
-        "sources_verified": True,
-        "risk_level": result["risk_level"],
+        "sources_verified": result["sources_verified"],
+        "source_validation": "supplied_metadata_only",
+        "output_validated": result["output_validated"],
         "recommendation": result["recommendation"],
-        "risk_analysis": result["risk_analysis"],
-        "generated_at": datetime.now().isoformat(),
-        "latency_ms": total_latency,
-        "architecture": "LangGraph StateGraph: DataFetch -> RiskAnalysis(RAG+SGP4) -> ReportGeneration(Groq+Fallback)",
-        "graph_metadata": {
-            "nodes": result.get("graph_nodes", []),
-            "state_transitions": result.get("state_transitions", 0),
-            "rag_corpus": get_corpus_stats()
-        }
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "architecture": "LangGraph stateful investigation workflow",
     }

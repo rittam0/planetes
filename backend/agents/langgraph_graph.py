@@ -1,154 +1,238 @@
-from typing import TypedDict, List, Dict, Any, Optional
-from langgraph.graph import StateGraph, END
-import time
-from datetime import datetime
-from services.sgp4_service import compute_conjunction_risk
+from typing import Any, Dict, List, Optional, TypedDict
+
+from langgraph.graph import END, StateGraph
+
 from services.groq_llm import generate_report
-from services.rag_service import retrieve_context
 
-class InvestigationState(TypedDict):
-    conjunction_id: str
-    question: str
-    object_a: Optional[Dict[str, Any]]
-    object_b: Optional[Dict[str, Any]]
-    risk_analysis: Optional[Dict[str, Any]]
-    llm_report: Optional[Dict[str, Any]]
-    rag_context: Optional[str]
+
+GENERAL_INTERPRETATION_RULES = (
+    "Interpret only supplied measurements. Distinguish measured or propagated data "
+    "from representative visualization coordinates. Do not infer collision or impact "
+    "probability without an appropriate trajectory and uncertainty model."
+)
+
+
+class InvestigationState(TypedDict, total=False):
+    selected_object: Dict[str, Any]
+    normalized_object: Dict[str, Any]
+    route: str
+    analysis: Dict[str, Any]
+    structured_report: Dict[str, Any]
+    report: str
+    recommendation: str
+    workflow_steps: List[Dict[str, Any]]
     sources: List[str]
-    agent_steps: List[Dict[str, Any]]
-    report: Optional[str]
-    risk_level: Optional[str]
-    recommendation: Optional[str]
-    latency_ms: float
+    sources_verified: bool
+    output_validated: bool
     llm_enabled: bool
+    llm_status: str
+    llm_latency_ms: Optional[float]
 
-def data_fetch_node(state: InvestigationState) -> InvestigationState:
-    start = time.time()
-    state["object_a"] = {
-        "norad_id": "25544", "name": "ISS", "category": "active_satellite",
-        "altitude_km": 408, "velocity_kms": 7.66, "mass_kg": 420000,
-        "operator": "NASA", "country": "US"
-    }
-    state["object_b"] = {
-        "norad_id": "50123", "name": "Debris Fragment", "category": "debris",
-        "altitude_km": 412, "velocity_kms": 7.62, "mass_kg": 5,
-        "operator": "N/A", "country": "CN",
-        "latitude": 50.0, "longitude": -5.0
-    }
-    state["sources"] = ["KeepTrack Catalog API v4", "Space-Track.org TLE Repository"]
-    latency = round((time.time() - start) * 1000, 2)
-    state["agent_steps"] = [{
-        "agent": "Data Fetcher",
-        "action": "Retrieved object metadata and TLEs from catalog APIs",
-        "result": f"Objects: ISS (25544) and Debris (50123)",
-        "latency_ms": latency
+
+def validate_and_normalize_node(state: InvestigationState) -> InvestigationState:
+    supplied = dict(state["selected_object"])
+    category = str(supplied.get("category") or "unknown").lower()
+    supplied["category"] = category
+    supplied["source"] = str(supplied.get("source") or "unknown")
+    state["normalized_object"] = supplied
+    state["workflow_steps"] = [{
+        "step": "validate_and_normalize",
+        "status": "complete",
+        "detail": f"Validated supplied {category} object {supplied.get('norad_id', 'unknown')}.",
     }]
+    state["sources"] = [supplied["source"]] if supplied["source"] != "unknown" else []
     return state
 
-def risk_analysis_node(state: InvestigationState) -> InvestigationState:
-    start = time.time()
-    risk = compute_conjunction_risk(state["object_a"], state["object_b"])
-    state["risk_analysis"] = risk
-    state["risk_level"] = risk["risk_level"]
-    
-    rag_start = time.time()
-    query = f"conjunction risk {risk['risk_level']} {state['object_a']['name']} {state['object_b']['name']}"
-    rag_context, rag_latency = retrieve_context(query, top_k=2)
-    state["rag_context"] = rag_context
-    
-    state["sources"].append("NASA CARA Conjunction Assessment Guidelines")
-    state["sources"].append("RAG: Orbital Mechanics Corpus")
-    latency = round((time.time() - start) * 1000, 2)
-    state["agent_steps"].append({
-        "agent": "Risk Analyst",
-        "action": "Computed collision probability using SGP4 propagation + physics-informed scoring + RAG context retrieval",
-        "result": f"Probability: {risk['collision_probability']}. Risk score: {risk['risk_score']}. Regime: {risk['regime']}. RAG docs retrieved in {rag_latency}ms",
-        "latency_ms": latency,
-        "rag_latency_ms": rag_latency
+
+def route_by_category_node(state: InvestigationState) -> InvestigationState:
+    category = state["normalized_object"]["category"]
+    state["route"] = "asteroid" if category == "asteroid" else "orbital"
+    state["workflow_steps"].append({
+        "step": "route_by_category",
+        "status": "complete",
+        "detail": f"Selected {state['route']} analysis branch.",
     })
     return state
 
-def report_generation_node(state: InvestigationState) -> InvestigationState:
-    start = time.time()
-    risk = state["risk_analysis"]
-    level = state["risk_level"]
-    
-    if level == "HIGH":
-        fallback_rec = "IMMEDIATE MANEUVER REQUIRED. Contact operator within 4 hours."
-    elif level == "MEDIUM":
-        fallback_rec = "Monitor closely. Prepare contingency maneuver."
-    else:
-        fallback_rec = "Monitor per standard procedures. No maneuver required."
-    
-    state["recommendation"] = fallback_rec
-    state["report"] = (
-        f"Conjunction {state['conjunction_id']}: {level} risk. "
-        f"Collision probability: {risk['collision_probability']}. "
-        f"Miss distance: {risk['distance_km']} km. "
-        f"Kinetic energy: {risk['kinetic_energy_j']} J. "
-        f"{fallback_rec}"
+
+def route_category(state: InvestigationState) -> str:
+    return state["route"]
+
+
+def orbital_analysis_node(state: InvestigationState) -> InvestigationState:
+    obj = state["normalized_object"]
+    position_mode = obj.get("position_mode", "unavailable")
+    is_propagated = position_mode == "sgp4"
+    summary = (
+        f"{obj.get('name', 'Unknown object')} is a {obj.get('category', 'orbital object')} "
+        f"at {obj.get('altitude_km', 'unknown')} km altitude with supplied velocity "
+        f"{obj.get('velocity_kms', 'unknown')} km/s, inclination "
+        f"{obj.get('inclination_deg', 'unknown')}°, and period "
+        f"{obj.get('period_min', 'unknown')} minutes."
     )
-    state["llm_enabled"] = False
-    
-    llm_report = None
-    try:
-        llm_report = generate_report(
-            state["conjunction_id"],
-            risk,
-            state["object_a"],
-            state["object_b"],
-            state["question"],
-            rag_context=state.get("rag_context", "")
-        )
-    except Exception as e:
-        print(f"[LangGraph] LLM fallback: {e}")
-    
-    if llm_report:
-        state["llm_report"] = llm_report
-        state["llm_enabled"] = True
-        state["report"] = llm_report.get("risk_summary", state["report"])
-        state["recommendation"] = llm_report.get("recommended_action", fallback_rec)
-    
-    state["sources"].append("Orbital Mechanics Reference - Vallado, Fundamentals of Astrodynamics")
-    latency = round((time.time() - start) * 1000, 2)
-    state["agent_steps"].append({
-        "agent": "Report Generator",
-        "action": "LLM-structured report via Groq with RAG augmentation" if state["llm_enabled"] else "Deterministic template fallback",
-        "result": state["report"],
-        "latency_ms": latency
+    provenance = (
+        "The displayed position is derived from SGP4 propagation of a retrieved TLE."
+        if is_propagated else
+        "The displayed position is representative and is not an SGP4-derived current position."
+    )
+    state["analysis"] = {
+        "analysis_type": "satellite_debris",
+        "summary": summary,
+        "provenance": provenance,
+        "risk_statement": (
+            "No operational collision probability is available: this object record does "
+            "not include a conjunction event, covariance, or time of closest approach."
+        ),
+        "numeric_facts": {
+            key: obj.get(key) for key in (
+                "altitude_km", "velocity_kms", "inclination_deg", "period_min"
+            ) if obj.get(key) is not None
+        },
+    }
+    state["workflow_steps"].append({
+        "step": "orbital_analysis",
+        "status": "complete",
+        "detail": "Interpreted supplied orbital fields without calculating collision probability.",
     })
     return state
+
+
+def asteroid_analysis_node(state: InvestigationState) -> InvestigationState:
+    obj = state["normalized_object"]
+    summary = (
+        f"{obj.get('name', 'Unknown asteroid')} has a NASA NeoWs approach event dated "
+        f"{obj.get('approach_date') or 'unknown'}, with supplied miss distance "
+        f"{obj.get('real_miss_distance_km', 'unknown')} km, relative velocity "
+        f"{obj.get('velocity_kms', 'unknown')} km/s, estimated maximum diameter "
+        f"{obj.get('diameter_km', 'unknown')} km, and hazardous flag "
+        f"{obj.get('hazardous', 'unknown')}."
+    )
+    state["analysis"] = {
+        "analysis_type": "asteroid_approach",
+        "summary": summary,
+        "provenance": (
+            "Approach statistics are supplied from NASA NeoWs. Spatial placement is a "
+            "representative compressed visualization, not an ephemeris."
+        ),
+        "risk_statement": (
+            "The potentially hazardous classification is a screening flag, not an impact "
+            "prediction. No impact probability is inferred."
+        ),
+        "numeric_facts": {
+            key: obj.get(key) for key in (
+                "real_miss_distance_km", "velocity_kms", "diameter_km"
+            ) if obj.get(key) is not None
+        },
+    }
+    state["workflow_steps"].append({
+        "step": "asteroid_analysis",
+        "status": "complete",
+        "detail": "Interpreted supplied NASA approach-event fields without inventing impact probability.",
+    })
+    return state
+
+
+def _fallback_report(state: InvestigationState) -> Dict[str, Any]:
+    analysis = state["analysis"]
+    return {
+        "summary": analysis["summary"],
+        "interpretation": f"{analysis['provenance']} {analysis['risk_statement']}",
+        "recommendation": "Use this as an educational screening summary; consult authoritative orbital data for operational decisions.",
+        "numeric_facts": analysis["numeric_facts"],
+    }
+
+
+def structured_report_node(state: InvestigationState) -> InvestigationState:
+    fallback = _fallback_report(state)
+    llm_result = generate_report(
+        selected_object=state["normalized_object"],
+        deterministic_analysis=state["analysis"],
+        system_instruction=GENERAL_INTERPRETATION_RULES,
+    )
+    state["llm_enabled"] = llm_result["status"] == "success"
+    state["llm_status"] = llm_result["status"]
+    state["llm_latency_ms"] = llm_result.get("latency_ms")
+    state["structured_report"] = llm_result.get("report") or fallback
+    state["workflow_steps"].append({
+        "step": "structured_report",
+        "status": llm_result["status"],
+        "detail": (
+            "Generated and parsed a structured AI report."
+            if state["llm_enabled"] else
+            f"Used deterministic fallback ({llm_result['status']})."
+        ),
+    })
+    return state
+
+
+def validate_numeric_facts(
+    report: Dict[str, Any], deterministic_analysis: Dict[str, Any]
+) -> bool:
+    required = {"summary", "interpretation", "recommendation", "numeric_facts"}
+    if not required.issubset(report) or not isinstance(report["numeric_facts"], dict):
+        return False
+    expected = deterministic_analysis["numeric_facts"]
+    facts = report["numeric_facts"]
+    if set(facts) != set(expected):
+        return False
+    for key, value in expected.items():
+        if key not in facts:
+            return False
+        try:
+            if abs(float(facts[key]) - float(value)) > 1e-6:
+                return False
+        except (TypeError, ValueError):
+            if facts[key] != value:
+                return False
+    return all(isinstance(report[key], str) and report[key].strip() for key in required - {"numeric_facts"})
+
+
+def validate_output_node(state: InvestigationState) -> InvestigationState:
+    valid = validate_numeric_facts(state["structured_report"], state["analysis"])
+    if not valid:
+        state["structured_report"] = _fallback_report(state)
+        state["llm_enabled"] = False
+        state["llm_status"] = "schema_failure"
+    state["output_validated"] = validate_numeric_facts(
+        state["structured_report"], state["analysis"]
+    )
+    # The API validates report structure and numbers, but does not re-fetch a
+    # client-supplied object; source provenance therefore remains unverified.
+    state["sources_verified"] = False
+    report = state["structured_report"]
+    state["report"] = (
+        f"{report['summary']}\n\n{report['interpretation']}\n\n"
+        f"Recommendation: {report['recommendation']}"
+    )
+    state["recommendation"] = report["recommendation"]
+    state["workflow_steps"].append({
+        "step": "validate_output",
+        "status": "complete" if state["output_validated"] else "failed",
+        "detail": "Validated required fields and deterministic numeric values.",
+    })
+    return state
+
 
 builder = StateGraph(InvestigationState)
-builder.add_node("data_fetch", data_fetch_node)
-builder.add_node("risk_analysis", risk_analysis_node)
-builder.add_node("report_generation", report_generation_node)
-builder.set_entry_point("data_fetch")
-builder.add_edge("data_fetch", "risk_analysis")
-builder.add_edge("risk_analysis", "report_generation")
-builder.add_edge("report_generation", END)
+builder.add_node("validate_and_normalize", validate_and_normalize_node)
+builder.add_node("route_by_category", route_by_category_node)
+builder.add_node("orbital_analysis", orbital_analysis_node)
+builder.add_node("asteroid_analysis", asteroid_analysis_node)
+builder.add_node("generate_structured_report", structured_report_node)
+builder.add_node("validate_output", validate_output_node)
+builder.set_entry_point("validate_and_normalize")
+builder.add_edge("validate_and_normalize", "route_by_category")
+builder.add_conditional_edges(
+    "route_by_category",
+    route_category,
+    {"orbital": "orbital_analysis", "asteroid": "asteroid_analysis"},
+)
+builder.add_edge("orbital_analysis", "generate_structured_report")
+builder.add_edge("asteroid_analysis", "generate_structured_report")
+builder.add_edge("generate_structured_report", "validate_output")
+builder.add_edge("validate_output", END)
 investigation_graph = builder.compile()
 
-def run_investigation(conjunction_id: str, question: str) -> Dict[str, Any]:
-    start = time.time()
-    initial_state: InvestigationState = {
-        "conjunction_id": conjunction_id,
-        "question": question,
-        "object_a": None,
-        "object_b": None,
-        "risk_analysis": None,
-        "llm_report": None,
-        "rag_context": None,
-        "sources": [],
-        "agent_steps": [],
-        "report": None,
-        "risk_level": None,
-        "recommendation": None,
-        "latency_ms": 0.0,
-        "llm_enabled": False
-    }
-    result = investigation_graph.invoke(initial_state)
-    result["latency_ms"] = round((time.time() - start) * 1000, 2)
-    result["graph_nodes"] = ["data_fetch", "risk_analysis", "report_generation"]
-    result["state_transitions"] = 3
-    return result
+
+def run_investigation(selected_object: Dict[str, Any]) -> InvestigationState:
+    return investigation_graph.invoke({"selected_object": selected_object})

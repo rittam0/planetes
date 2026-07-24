@@ -15,9 +15,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends     libpq5     
 COPY --from=builder /root/.local /root/.local
 ENV PATH=/root/.local/bin:$PATH
 
-COPY backend/ ./backend/
+COPY backend/ ./
 COPY backend/.env.example .env
 
 EXPOSE 8000
 
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

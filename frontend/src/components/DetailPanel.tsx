@@ -1,12 +1,10 @@
 import { usePlanetesStore } from '../store'
-import { useObjectDetail } from '../hooks/useObjects'
 import { X, Satellite, Trash2, Rocket, AlertTriangle, Crosshair, Orbit, Gauge, Timer, Compass } from 'lucide-react'
 import { useState } from 'react'
 import { InvestigationPanel } from './InvestigationPanel'
 
 export function DetailPanel() {
   const { selectedObject, selectObject } = usePlanetesStore()
-  const { detail, loading } = useObjectDetail(selectedObject?.norad_id || null)
   const [showInvestigation, setShowInvestigation] = useState(false)
 
   if (!selectedObject) return null
@@ -50,6 +48,9 @@ export function DetailPanel() {
             </div>
             <div className="mt-3 font-mono text-xs text-text-muted">
               NORAD: {selectedObject.norad_id}
+            </div>
+            <div className="mt-1 font-mono text-xs text-text-muted">
+              {provenanceLabel(selectedObject)}
             </div>
           </div>
 
@@ -101,58 +102,49 @@ export function DetailPanel() {
               </div>
             </div>
 
-            {/* Conjunctions */}
-            {detail?.conjunctions && detail.conjunctions.length > 0 && (
-              <div>
-                <div className="hud-label mb-3">Upcoming Encounters</div>
-                <div className="space-y-2">
-                  {detail.conjunctions.slice(0, 3).map((conj: any) => (
-                    <div key={conj.id} className="glass-panel p-3">
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono text-sm text-text">
-                          vs {conj.secondary_name}
-                        </span>
-                        <span className={`font-mono text-xs ${
-                          conj.max_probability > 1e-4 ? 'text-debris' :
-                          conj.max_probability > 1e-6 ? 'text-amber' : 'text-satellite'
-                        }`}>
-                          {conj.max_probability > 1e-4 ? 'HIGH' :
-                           conj.max_probability > 1e-6 ? 'MOD' : 'LOW'}
-                        </span>
-                      </div>
-                      <div className="font-mono text-xs text-text-muted mt-1">
-                        Miss: {conj.min_range_km.toFixed(3)} km · 
-                        Rel: {conj.relative_velocity_kms.toFixed(2)} km/s
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* Investigate Button */}
-            {detail?.conjunctions && detail.conjunctions.length > 0 && (
-              <button
-                onClick={() => setShowInvestigation(true)}
-                className="w-full btn-primary justify-center py-3"
-              >
-                <Orbit size={16} />
-                Investigate with AI
-              </button>
-            )}
+            <button
+              onClick={() => setShowInvestigation(true)}
+              className="w-full btn-primary justify-center py-3"
+            >
+              <Orbit size={16} />
+              Investigate object
+            </button>
           </div>
         </div>
       </div>
 
       {/* Investigation Overlay */}
-      {showInvestigation && detail?.conjunctions?.[0] && (
+      {showInvestigation && (
         <InvestigationPanel
-          conjunction={detail.conjunctions[0]}
+          selectedObject={selectedObject}
           onClose={() => setShowInvestigation(false)}
         />
       )}
     </>
   )
+}
+
+function provenanceLabel(obj: {
+  source: string
+  data_status?: string
+  position_mode?: string
+  visualization_mode?: string
+}) {
+  if (obj.data_status === 'degraded') return 'Data unavailable or degraded'
+  if (obj.source === 'nasa') {
+    return 'NASA NeoWs event / representative compressed visualization'
+  }
+  if (obj.source === 'simulated' || obj.visualization_mode === 'synthetic') {
+    return 'Simulated data'
+  }
+  if (obj.source === 'keeptrack' && obj.position_mode === 'sgp4') {
+    return 'Live KeepTrack data / SGP4-derived position'
+  }
+  if (obj.source === 'keeptrack') {
+    return 'Live KeepTrack metadata / representative position'
+  }
+  return `Source: ${obj.source || 'unavailable'}`
 }
 
 function DataCard({ icon: Icon, label, value, unit, color }: {

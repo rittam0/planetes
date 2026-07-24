@@ -10,6 +10,17 @@ export interface OrbitalObject {
   longitude: number
   inclination_deg: number
   period_min: number
+  source: string
+  data_status?: 'live' | 'degraded' | 'simulated'
+  position_mode?: string
+  position_accuracy?: string
+  visualization_mode?: string
+  source_epoch?: string
+  retrieved_at?: string
+  approach_date?: string
+  real_miss_distance_km?: number
+  diameter_km?: number
+  hazardous?: boolean
 }
 
 export interface ConjunctionEvent {

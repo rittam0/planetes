@@ -103,11 +103,11 @@ export function useConjunctions() {
   return { loading }
 }
 
-export async function runInvestigation(conjunctionId: string): Promise<any> {
+export async function runInvestigation(selectedObject: object): Promise<any> {
   const res = await fetch(`${API_BASE}/investigate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ conjunction_id: conjunctionId })
+    body: JSON.stringify({ selected_object: selectedObject })
   })
 
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
