@@ -139,10 +139,10 @@ function provenanceLabel(obj: {
     return 'Simulated data'
   }
   if (obj.source === 'keeptrack' && obj.position_mode === 'sgp4') {
-    return 'Live KeepTrack data / SGP4-derived position'
+    return 'Live orbital catalogue / SGP4-derived position'
   }
   if (obj.source === 'keeptrack') {
-    return 'Live KeepTrack metadata / representative position'
+    return 'Live orbital catalogue metadata / representative position'
   }
   return `Source: ${obj.source || 'unavailable'}`
 }
