@@ -14,13 +14,17 @@ def test_application_imports_without_groq_key(monkeypatch):
 async def test_object_failures_return_explicit_degraded_status(monkeypatch):
     import routers.objects as objects_router
 
-    async def no_satellites(limit=30):
-        return []
+    async def no_satellites():
+        return [], {
+            "fetched_at": None, "expires_at": None, "record_count": 0,
+            "stale": False, "source": "keeptrack_v4_sats_brief",
+            "cache_hit": False, "latency_ms": 0, "etag": None,
+        }
 
     async def no_asteroids(start_date, end_date):
         return None
 
-    monkeypatch.setattr(objects_router, "fetch_satellites", no_satellites)
+    monkeypatch.setattr(objects_router, "fetch_catalogue", no_satellites)
     monkeypatch.setattr(objects_router, "fetch_asteroid_feed", no_asteroids)
     transport = httpx.ASGITransport(app=importlib.import_module("main").app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
