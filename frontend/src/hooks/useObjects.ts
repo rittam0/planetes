@@ -18,7 +18,7 @@ export function useObjects() {
         if (searchQuery) {
           params.set('search', searchQuery)
         }
-        params.set('limit', '5000')
+        params.set('limit', '2000')
 
         const res = await fetch(`${API_BASE}/objects?${params}`)
         if (!res.ok) throw new Error(`HTTP ${res.status}`)

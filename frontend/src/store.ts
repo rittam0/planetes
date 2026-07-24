@@ -82,7 +82,7 @@ export const usePlanetesStore = create<PlanetesState>((set, get) => ({
   conjunctions: [],
   investigation: null,
   isInvestigating: false,
-  activeFilters: new Set(['active_satellite', 'debris', 'asteroid']),
+  activeFilters: new Set(['active_satellite', 'debris', 'rocket_body', 'asteroid']),
   searchQuery: '',
   showDetailPanel: false,
   showInvestigationPanel: false,

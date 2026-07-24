@@ -282,6 +282,7 @@ export function Scene() {
     selectionGroupRef.current = selectionGroup
 
     raycasterRef.current = new THREE.Raycaster()
+    raycasterRef.current.params.Points = { threshold: 80 }
 
     const animate = () => {
       rafRef.current = requestAnimationFrame(animate)
@@ -309,7 +310,7 @@ export function Scene() {
     }
     window.addEventListener('resize', handleResize)
 
-    // ─── CLICK HANDLER — Uses invisible hit spheres, not tiny points ───
+    // ─── CLICK HANDLER — Direct point-buffer index lookup ───
     const handleClick = (event: MouseEvent) => {
       const rect = renderer.domElement.getBoundingClientRect()
       mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
@@ -321,12 +322,16 @@ export function Scene() {
       if (!raycaster || !camera || !orbitalGroup) return
 
       raycaster.setFromCamera(mouseRef.current, camera)
-      // Intersect against hit spheres (children of orbitalGroup)
-      const hitSpheres = orbitalGroup.children.filter(c => c.userData.isHitSphere)
-      const intersects = raycaster.intersectObjects(hitSpheres, false)
+      const pointClouds = orbitalGroup.children.filter(
+        child => child instanceof THREE.Points && child.visible
+      )
+      const intersects = raycaster.intersectObjects(pointClouds, false)
 
       if (intersects.length > 0) {
-        const hitObject = intersects[0].object.userData.orbitalObject
+        const intersection = intersects[0]
+        const pointIndex = intersection.index
+        const pointObjects = intersection.object.userData.objects as OrbitalObject[]
+        const hitObject = pointIndex === undefined ? undefined : pointObjects[pointIndex]
         if (hitObject) {
           selectObject(hitObject)
         }
@@ -346,7 +351,7 @@ export function Scene() {
     }
   }, [selectObject])
 
-  // ─── Update Orbital Objects — Custom Shader + Hit Spheres ───
+  // ─── Update Orbital Objects — Custom Shader Points ───
   useEffect(() => {
     const group = orbitalGroupRef.current
     if (!group) return
@@ -387,7 +392,7 @@ export function Scene() {
     }
 
     for (const [category, items] of Object.entries(byCategory)) {
-      if (items.length === 0) continue
+      if (items.length === 0 || !activeFilters.has(category)) continue
 
       // ─── Custom Shader Points ───
       const geometry = new THREE.BufferGeometry()
@@ -428,54 +433,10 @@ export function Scene() {
       })
 
       const points = new THREE.Points(geometry, material)
-      points.visible = activeFilters.has(category)
+      points.userData = { category, objects: items }
       group.add(points)
-
-      // ─── Invisible Hit Spheres for Clicking ───
-      const hitGeometry = new THREE.SphereGeometry(80, 8, 8)
-      const hitMaterial = new THREE.MeshBasicMaterial({ color: catColor,
-        visible: true,
-        transparent: false,
-        opacity: 1.0,
-      })
-
-      for (let i = 0; i < items.length; i++) {
-        const obj = items[i]
-        const r = EARTH_RADIUS + Math.max(0, obj.altitude_km)
-        const lat = THREE.MathUtils.degToRad(obj.latitude)
-        const lon = THREE.MathUtils.degToRad(obj.longitude)
-
-        const hitSphere = new THREE.Mesh(hitGeometry, hitMaterial)
-        hitSphere.position.set(
-          r * Math.cos(lat) * Math.cos(lon),
-          r * Math.sin(lat),
-          r * Math.cos(lat) * Math.sin(lon)
-        )
-        hitSphere.userData = {
-          isHitSphere: true,
-          orbitalObject: obj,
-        }
-        hitSphere.visible = activeFilters.has(category)
-        group.add(hitSphere)
-      }
     }
-  }, [objects])
-
-  // ─── Update Filters ───
-  useEffect(() => {
-    const group = orbitalGroupRef.current
-    if (!group) return
-
-    for (const child of group.children) {
-      const cat = child.userData.category
-      if (cat) {
-        child.visible = activeFilters.has(cat)
-      }
-      if (child.userData.isHitSphere) {
-        child.visible = activeFilters.has(child.userData.orbitalObject?.category)
-      }
-    }
-  }, [activeFilters])
+  }, [objects, activeFilters])
 
   // ─── Update Selection ───
   useEffect(() => {
