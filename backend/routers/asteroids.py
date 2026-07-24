@@ -1,36 +1,18 @@
 from fastapi import APIRouter
 from services.nasa import fetch_asteroid_feed
+from routers.metrics import record_error
 from datetime import datetime, timedelta
-import random
+import hashlib
 import time
 
 router = APIRouter(prefix="/api")
 
-def _mock_asteroids():
-    names = ["Apophis", "Bennu", "Ryugu", "Didymos", "Toutatis", "Eros", "Itokawa", "Ceres", "Vesta", "Pallas"]
-    objs = []
-    for i in range(10):
-        objs.append({
-            "norad_id": f"AST-{1000+i}",
-            "name": f"{random.choice(names)}-{i+1}",
-            "category": "asteroid",
-            "altitude_km": round(random.uniform(500000, 50000000), 0),
-            "velocity_kms": round(random.uniform(5, 30), 2),
-            "latitude": round(random.uniform(-90, 90), 2),
-            "longitude": round(random.uniform(-180, 180), 2),
-            "inclination_deg": round(random.uniform(0, 180), 2),
-            "period_min": 0,
-            "operator": "N/A",
-            "country": "N/A",
-            "launch_date": "N/A",
-            "mass_kg": random.choice(["1e15", "1e12", "1e9", "1e6", "1e18"]),
-            "mission": "Near-Earth Object",
-            "diameter_km": round(random.uniform(0.1, 50), 2),
-            "hazardous": random.choice([True, False]),
-            "approach_date": f"{random.randint(2024, 2030)}-{random.randint(1,12):02d}-{random.randint(1,28):02d}",
-            "source": "mock"
-        })
-    return objs
+def _representative_position(object_id: str) -> tuple[float, float, float]:
+    digest = hashlib.sha256(object_id.encode("utf-8")).digest()
+    latitude = (int.from_bytes(digest[0:4], "big") / (2**32 - 1)) * 180 - 90
+    longitude = (int.from_bytes(digest[4:8], "big") / (2**32 - 1)) * 360 - 180
+    inclination = (int.from_bytes(digest[8:12], "big") / (2**32 - 1)) * 180
+    return round(latitude, 2), round(longitude, 2), round(inclination, 2)
 
 @router.get("/asteroids")
 async def get_asteroids():
@@ -45,15 +27,17 @@ async def get_asteroids():
                 for item in items:
                     approach = item.get("close_approach_data", [{}])[0]
                     miss_km = float(approach.get("miss_distance", {}).get("kilometers", 0))
+                    object_id = str(item.get("neo_reference_id") or item.get("id") or "unknown-asteroid")
+                    latitude, longitude, inclination = _representative_position(object_id)
                     neos.append({
-                        "norad_id": item.get("neo_reference_id", f"AST-{random.randint(1000,9999)}"),
+                        "norad_id": object_id,
                         "name": item.get("name", "Unknown"),
                         "category": "asteroid",
                         "altitude_km": round(miss_km, 0),
                         "velocity_kms": float(approach.get("relative_velocity", {}).get("kilometers_per_second", 0)),
-                        "latitude": round(random.uniform(-90, 90), 2),
-                        "longitude": round(random.uniform(-180, 180), 2),
-                        "inclination_deg": round(random.uniform(0, 180), 2),
+                        "latitude": latitude,
+                        "longitude": longitude,
+                        "inclination_deg": inclination,
                         "period_min": 0,
                         "operator": "N/A",
                         "country": "N/A",
@@ -63,7 +47,13 @@ async def get_asteroids():
                         "diameter_km": item.get("estimated_diameter", {}).get("kilometers", {}).get("estimated_diameter_max", 0),
                         "hazardous": item.get("is_potentially_hazardous_asteroid", False),
                         "approach_date": approach.get("close_approach_date", ""),
-                        "source": "nasa"
+                        "source": "nasa",
+                        "data_status": "live",
+                        "visualization_mode": "representative_compressed",
+                        "position_accuracy": "not_ephemeris",
+                        "position_mode": "representative",
+                        "real_miss_distance_km": round(miss_km, 0),
+                        "retrieved_at": datetime.utcnow().isoformat() + "Z",
                     })
             api_latency = data.get("_api_latency_ms", 0)
             total_latency = round((time.time() - start) * 1000, 2)
@@ -77,11 +67,13 @@ async def get_asteroids():
             }
     except Exception as e:
         print(f"[Asteroids] API failed: {e}")
-    objs = _mock_asteroids()
+    record_error("nasa")
     return {
-        "objects": objs,
-        "total": len(objs),
-        "source": "mock",
+        "objects": [],
+        "total": 0,
+        "source": "nasa",
+        "data_status": "degraded",
+        "degraded_data": True,
         "api_latency_ms": round((time.time() - start) * 1000, 2),
-        "warning": "NASA API unavailable. Using mock asteroid data."
+        "warning": "NASA API unavailable; no asteroid events are being reported."
     }

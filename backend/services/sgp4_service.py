@@ -2,7 +2,19 @@ import time
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone
 from sgp4.api import Satrec, jday
+from sgp4.conveniences import sat_epoch_datetime
 import math
+
+def _greenwich_sidereal_time(julian_date: float) -> float:
+    centuries = (julian_date - 2451545.0) / 36525.0
+    degrees = (
+        280.46061837
+        + 360.98564736629 * (julian_date - 2451545.0)
+        + 0.000387933 * centuries * centuries
+        - centuries * centuries * centuries / 38710000.0
+    )
+    return math.radians(degrees % 360.0)
+
 
 def propagate_tle(tle_line1: str, tle_line2: str, timestamp=None):
     start = time.time()
@@ -10,8 +22,11 @@ def propagate_tle(tle_line1: str, tle_line2: str, timestamp=None):
         satellite = Satrec.twoline2rv(tle_line1, tle_line2)
         if timestamp is None:
             timestamp = datetime.now(timezone.utc)
+        elif timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
         jd, fr = jday(timestamp.year, timestamp.month, timestamp.day,
-                      timestamp.hour, timestamp.minute, timestamp.second)
+                      timestamp.hour, timestamp.minute,
+                      timestamp.second + timestamp.microsecond / 1_000_000)
         e, r, v = satellite.sgp4(jd, fr)
         if e != 0:
             return None
@@ -19,16 +34,22 @@ def propagate_tle(tle_line1: str, tle_line2: str, timestamp=None):
         vx, vy, vz = v
         r_mag = math.sqrt(x*x + y*y + z*z)
         altitude = r_mag - 6371.0
+        theta = _greenwich_sidereal_time(jd + fr)
+        x_ecef = x * math.cos(theta) + y * math.sin(theta)
+        y_ecef = -x * math.sin(theta) + y * math.cos(theta)
         lat = math.degrees(math.asin(z / r_mag))
-        lon = math.degrees(math.atan2(y, x))
+        lon = math.degrees(math.atan2(y_ecef, x_ecef))
         return {
+            "norad_id": satellite.satnum_str,
             "position_km": [round(x, 2), round(y, 2), round(z, 2)],
             "velocity_kms": [round(vx, 2), round(vy, 2), round(vz, 2)],
             "latitude": round(lat, 2),
             "longitude": round(lon, 2),
             "altitude_km": round(altitude, 2),
             "latency_ms": round((time.time() - start) * 1000, 3),
-            "method": "sgp4"
+            "method": "sgp4",
+            "tle_epoch": sat_epoch_datetime(satellite).isoformat(),
+            "propagated_at": timestamp.isoformat(),
         }
     except Exception as e:
         print(f"[SGP4] Error: {e}")

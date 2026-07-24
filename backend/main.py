@@ -1,3 +1,5 @@
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routers import objects, asteroids, conjunctions, investigate, metrics
@@ -8,9 +10,16 @@ app = FastAPI(
     version="1.0.0"
 )
 
+default_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+configured_origins = [
+    origin.strip()
+    for origin in os.getenv("ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=list(dict.fromkeys(default_origins + configured_origins)),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -31,8 +40,8 @@ async def root():
             "Live KeepTrack satellite catalog (30+ satellites with real TLEs)",
             "Live NASA NeoWs asteroid tracking",
             "SGP4 orbital propagation on real TLE data",
-            "Groq LLM structured report generation",
-            "Physics-informed conjunction risk scoring"
+            "Groq structured AI reports with deterministic fallback",
+            "LangGraph stateful selected-object investigation workflow"
         ]
     }
 

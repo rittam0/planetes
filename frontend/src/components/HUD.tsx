@@ -1,5 +1,5 @@
 import { usePlanetesStore } from '../store'
-import { Satellite, Trash2, AlertTriangle } from 'lucide-react'
+import { Satellite, Trash2, AlertTriangle, Rocket } from 'lucide-react'
 
 export function HUD() {
   const {
@@ -12,6 +12,7 @@ export function HUD() {
   const categories = [
     { key: 'active_satellite', label: 'Satellites', icon: Satellite, color: 'text-green-400', bg: 'bg-green-400/10', border: 'border-green-400/30' },
     { key: 'debris', label: 'Debris', icon: Trash2, color: 'text-red-400', bg: 'bg-red-400/10', border: 'border-red-400/40' },
+    { key: 'rocket_body', label: 'Rocket Bodies', icon: Rocket, color: 'text-amber-300', bg: 'bg-amber-300/10', border: 'border-amber-300/40' },
     { key: 'asteroid', label: 'Asteroids', icon: AlertTriangle, color: 'text-amber-400', bg: 'bg-amber-400/10', border: 'border-amber-400/40' },
   ]
 
