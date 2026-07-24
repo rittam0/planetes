@@ -9,6 +9,8 @@ const STAR_RADIUS = 500000
 const MIN_ZOOM = 6600
 const MAX_ZOOM = 150000
 const CAMERA_START = 22000
+const ASTEROID_MIN_RADIUS = 90000
+const ASTEROID_MAX_RADIUS = MAX_ZOOM - 10000
 
 const CATEGORY_COLORS: Record<OrbitalObject['category'], THREE.Color> = {
   active_satellite: new THREE.Color('#4ade80'),
@@ -22,6 +24,16 @@ const CATEGORY_SIZES: Record<OrbitalObject['category'], number> = {
   debris: 3,
   rocket_body: 4,
   asteroid: 9,
+}
+
+function visualizationRadius(object: OrbitalObject): number {
+  if (object.category === 'asteroid') {
+    const compressedRadius = EARTH_RADIUS + Math.max(0, object.altitude_km) / 1000
+    return THREE.MathUtils.clamp(
+      compressedRadius, ASTEROID_MIN_RADIUS, ASTEROID_MAX_RADIUS
+    )
+  }
+  return EARTH_RADIUS + Math.max(0, object.altitude_km)
 }
 
 // ─── Custom Point Shader — Visible at All Distances ───
@@ -141,7 +153,7 @@ function createStarfield() {
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
 
   return new THREE.Points(geometry, new THREE.PointsMaterial({
-    size: 1.8, vertexColors: true, transparent: false, opacity: 0.65,
+    size: 1.4, vertexColors: true, transparent: true, opacity: 0.28,
     sizeAttenuation: false, depthWrite: false,
   }))
 }
@@ -152,8 +164,7 @@ function createTrajectory(object: OrbitalObject): THREE.BufferGeometry {
   const inclination = THREE.MathUtils.degToRad(object.inclination_deg)
   const latRad = THREE.MathUtils.degToRad(object.latitude)
   const lonRad = THREE.MathUtils.degToRad(object.longitude)
-  const alt = Math.max(0, object.altitude_km)
-  const radius = EARTH_RADIUS + alt
+  const radius = visualizationRadius(object)
 
   const phase = Math.asin(Math.max(-1, Math.min(1,
     Math.sin(latRad) / Math.max(0.001, Math.abs(Math.sin(inclination))))))
@@ -404,7 +415,7 @@ export function Scene() {
 
       for (let i = 0; i < items.length; i++) {
         const obj = items[i]
-        const r = EARTH_RADIUS + Math.max(0, obj.altitude_km)
+        const r = visualizationRadius(obj)
         const lat = THREE.MathUtils.degToRad(obj.latitude)
         const lon = THREE.MathUtils.degToRad(obj.longitude)
 
@@ -493,7 +504,7 @@ export function Scene() {
 
     if (!selectedObject) return
 
-    const r = EARTH_RADIUS + Math.max(0, selectedObject.altitude_km)
+    const r = visualizationRadius(selectedObject)
     const lat = THREE.MathUtils.degToRad(selectedObject.latitude)
     const lon = THREE.MathUtils.degToRad(selectedObject.longitude)
     const pos = new THREE.Vector3(
