@@ -9,19 +9,21 @@ const STAR_RADIUS = 500000
 const MIN_ZOOM = 6600
 const MAX_ZOOM = 150000
 const CAMERA_START = 22000
+const ASTEROID_MIN_RADIUS = 60000
+const ASTEROID_MAX_RADIUS = 90000
 
 const CATEGORY_COLORS: Record<OrbitalObject['category'], THREE.Color> = {
   active_satellite: new THREE.Color('#4ade80'),
   debris: new THREE.Color('#f87171'),
-  rocket_body: new THREE.Color('#ffaa00'),
+  rocket_body: new THREE.Color('#a78bfa'),
   asteroid: new THREE.Color('#f59e0b'),
 }
 
 const CATEGORY_SIZES: Record<OrbitalObject['category'], number> = {
-  active_satellite: 6,
-  debris: 3,
-  rocket_body: 4,
-  asteroid: 9,
+  active_satellite: 8,
+  debris: 5,
+  rocket_body: 6,
+  asteroid: 12,
 }
 
 // ─── Custom Point Shader — Visible at All Distances ───
@@ -32,7 +34,9 @@ const pointVertexShader = `
   void main() {
     vColor = pointColor;
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-    gl_PointSize = pointSize * (300.0 / -mvPosition.z);
+    float distanceScaledSize = pointSize * (300.0 / -mvPosition.z);
+    float minimumVisibleSize = pointSize * 0.9;
+    gl_PointSize = max(minimumVisibleSize, distanceScaledSize);
     gl_Position = projectionMatrix * mvPosition;
   }
 `
@@ -42,8 +46,12 @@ const pointFragmentShader = `
   void main() {
     float dist = length(gl_PointCoord - vec2(0.5));
     if (dist > 0.5) discard;
-    float alpha = 1.0 - smoothstep(0.3, 0.5, dist);
-    gl_FragColor = vec4(vColor, 1.0);
+
+    float softEdge = 1.0 - smoothstep(0.30, 0.50, dist);
+    float glow = 1.0 - smoothstep(0.0, 0.50, dist);
+    float alpha = max(softEdge, glow * 0.55);
+
+    gl_FragColor = vec4(vColor, alpha);
   }
 `
 
@@ -153,7 +161,10 @@ function createTrajectory(object: OrbitalObject): THREE.BufferGeometry {
   const latRad = THREE.MathUtils.degToRad(object.latitude)
   const lonRad = THREE.MathUtils.degToRad(object.longitude)
   const alt = Math.max(0, object.altitude_km)
-  const radius = EARTH_RADIUS + alt
+  const rawRadius = EARTH_RADIUS + alt
+  const radius = object.category === 'asteroid'
+    ? THREE.MathUtils.clamp(rawRadius, ASTEROID_MIN_RADIUS, ASTEROID_MAX_RADIUS)
+    : rawRadius
 
   const phase = Math.asin(Math.max(-1, Math.min(1,
     Math.sin(latRad) / Math.max(0.001, Math.abs(Math.sin(inclination))))))
@@ -282,7 +293,7 @@ export function Scene() {
     selectionGroupRef.current = selectionGroup
 
     raycasterRef.current = new THREE.Raycaster()
-    raycasterRef.current.params.Points = { threshold: 80 }
+    raycasterRef.current.params.Points = { threshold: 260 }
 
     const animate = () => {
       rafRef.current = requestAnimationFrame(animate)
@@ -405,7 +416,10 @@ export function Scene() {
 
       for (let i = 0; i < items.length; i++) {
         const obj = items[i]
-        const r = EARTH_RADIUS + Math.max(0, obj.altitude_km)
+        const rawRadius = EARTH_RADIUS + Math.max(0, obj.altitude_km)
+        const r = obj.category === 'asteroid'
+          ? THREE.MathUtils.clamp(rawRadius, ASTEROID_MIN_RADIUS, ASTEROID_MAX_RADIUS)
+          : rawRadius
         const lat = THREE.MathUtils.degToRad(obj.latitude)
         const lon = THREE.MathUtils.degToRad(obj.longitude)
 
@@ -458,7 +472,10 @@ export function Scene() {
 
     if (!selectedObject) return
 
-    const r = EARTH_RADIUS + Math.max(0, selectedObject.altitude_km)
+    const rawRadius = EARTH_RADIUS + Math.max(0, selectedObject.altitude_km)
+    const r = selectedObject.category === 'asteroid'
+      ? THREE.MathUtils.clamp(rawRadius, ASTEROID_MIN_RADIUS, ASTEROID_MAX_RADIUS)
+      : rawRadius
     const lat = THREE.MathUtils.degToRad(selectedObject.latitude)
     const lon = THREE.MathUtils.degToRad(selectedObject.longitude)
     const pos = new THREE.Vector3(
