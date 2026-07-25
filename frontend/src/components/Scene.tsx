@@ -15,8 +15,8 @@ const ASTEROID_MAX_RADIUS = 90000
 const CATEGORY_COLORS: Record<OrbitalObject['category'], THREE.Color> = {
   active_satellite: new THREE.Color('#4ade80'),
   debris: new THREE.Color('#f87171'),
-  rocket_body: new THREE.Color('#a78bfa'),
-  asteroid: new THREE.Color('#f59e0b'),
+  rocket_body: new THREE.Color('#f59e0b'),
+  asteroid: new THREE.Color('#a78bfa'),
 }
 
 const CATEGORY_SIZES: Record<OrbitalObject['category'], number> = {

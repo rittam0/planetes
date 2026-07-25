@@ -200,7 +200,7 @@ async def get_objects(
     total_latency = round((time.time() - start) * 1000, 2)
     
     return {
-        "objects": objects[:limit],
+        "objects": objects,
         "total": len(objects),
         "source": "keeptrack+nasa",
         "data_status": "live" if satellites or nasa_count else "degraded",

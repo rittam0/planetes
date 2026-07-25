@@ -13,7 +13,7 @@ export function DetailPanel() {
     active_satellite: { icon: Satellite, color: 'text-satellite', bg: 'bg-satellite/10', label: 'ACTIVE SATELLITE' },
     debris: { icon: Trash2, color: 'text-debris', bg: 'bg-debris/10', label: 'DEBRIS' },
     rocket_body: { icon: Rocket, color: 'text-rocket', bg: 'bg-rocket/10', label: 'ROCKET BODY' },
-    asteroid: { icon: AlertTriangle, color: 'text-white', bg: 'bg-white/10', label: 'ASTEROID' },
+    asteroid: { icon: AlertTriangle, color: 'text-violet-400', bg: 'bg-violet-400/10', label: 'ASTEROID' },
   }
 
   const config = categoryConfig[selectedObject.category] || categoryConfig.debris
