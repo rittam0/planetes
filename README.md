@@ -2,7 +2,7 @@
 
 Explore thousands of real satellites, debris objects, rocket bodies, and near-Earth asteroid approaches around an interactive 3D Earth.
 
-**[Live](https://planetes-49t5sxuey-dellan.vercel.app)** · **[Backend health](https://planetes-backend.onrender.com/api/health)** · **[API metrics](https://planetes-backend.onrender.com/api/metrics)**
+**[Live](https://planetes-livid.vercel.app)** · **[Backend health](https://planetes-backend.onrender.com/api/health)** · **[API metrics](https://planetes-backend.onrender.com/api/metrics)**
 
 ---
 
