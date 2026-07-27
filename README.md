@@ -76,7 +76,7 @@ This project did not arrive in its current form in one clean pass. The useful pa
 
 ### 1. The first ambitious globe rewrite was a downgrade
 
-An early revision replaced the stable textured Earth with procedural rendering and more custom shader work. It was harder to maintain, visually worse, and introduced repeated build problems.
+An early revision replaced the stable textured Earth with procedural rendering and more custom shader work. It was harder to maintain, visually deplorable, and introduced repeated build problems.
 
 **Decision:** restore the working textured globe and treat visual stability as a product requirement rather than a temporary compromise.
 
