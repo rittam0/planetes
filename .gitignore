@@ -16,3 +16,8 @@ __pycache__/
 .vite/
 
 .DS_Store
+
+# Local backup copies
+**/*-backup-*/
+*.bak
+*.orig
