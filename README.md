@@ -32,7 +32,6 @@ The following numbers were measured from the deployed backend rather than estima
 - **38** NASA near-Earth approach events in the verified response.
 - **0 synthetic orbital objects** in the active data path.
 - Approximately **1,019 propagated objects/second** in the measured backend run.
-- **0.01 ms** warm catalogue-cache lookup.
 - **22 passing backend tests** after the catalogue and rendering-scale work.
 
 These figures can vary as upstream catalogues and NASA feeds change.
@@ -153,10 +152,11 @@ Then open the Vite URL shown in the terminal.
 ## Tests
 
 ```bash
-cd backend
-pip install -r requirements-dev.txt
-python -m pytest tests -v
+pip install -r backend/requirements-dev.txt
+python -m pytest -v
 ```
+
+The root `pytest.ini` points pytest at `backend/`, so this works from the repo root.
 
 Frontend checks:
 
